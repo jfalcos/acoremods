@@ -1,0 +1,2 @@
+# Keep patch files byte-exact (LF) so `git apply` works against LF-ending core source.
+*.patch -text
