@@ -31,6 +31,13 @@ See [`conf/mod_custom_items.conf.dist`](conf/mod_custom_items.conf.dist).
 | ------- | ------- | ----------- |
 | `CustomItems.Enable` | `1` | Master switch. When `0`, the loader is skipped, the wire-rewrite hook becomes a no-op, and tooltip substitution is disabled. Existing tables are left in place. |
 
+## Database
+
+Ships its schema in [`data/sql/db-world/`](data/sql/db-world/) — AzerothCore auto-applies
+it on startup (the module's `data/sql/db-world` / `db-characters` folders are picked up by
+the DB updater once the module is built and the updater is enabled). Tables:
+`custom_item_template`, `custom_item_display_donors`.
+
 ## Core changes required
 
 This module needs `ScriptMgr` hooks that stock AzerothCore lacks — it **will not compile**

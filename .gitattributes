@@ -1,2 +1,5 @@
 # Keep patch files byte-exact (LF) so `git apply` works against LF-ending core source.
 *.patch -text
+
+# AzerothCore SQL is LF; keep it LF so the DB updater's content hashes stay stable.
+*.sql text eol=lf

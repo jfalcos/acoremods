@@ -53,6 +53,12 @@ git apply <path-to>/acoremods/core-patches/acore-core-hooks.patch
 See [core-patches/](core-patches/) for the full per-module breakdown of what the patch
 changes. `mod-living-world` and `mod-dynamic-ah` need no core changes.
 
-### Step 3 — Build
+### Step 3 — Build & database
 
 Re-run CMake and rebuild AzerothCore.
+
+Each module carries its own SQL under `mod-*/data/sql/db-world/` and `db-characters/`.
+AzerothCore's DB updater applies these automatically on worldserver startup (with the
+updater enabled — `Updates.EnableDatabases` / `AutoSetup`), so there's no manual import
+step. `mod-custom-items`, `mod-mount-progression`, `mod-terror-zones`, and `mod-living-world`
+all ship schema; `mod-dynamic-ah` uses only core tables.
