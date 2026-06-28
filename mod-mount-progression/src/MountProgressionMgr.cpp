@@ -780,7 +780,11 @@ void MountProgressionMgr::ApplyMountBuff(Player* player,
                                          CatalogEntry const* entry,
                                          uint16 level)
 {
-    if (!_enabled || !player || !entry)
+    // Skip dead/ghost players: the carrier spell is non-passive and not flagged
+    // ALLOW_DEAD_TARGET, so AddAura() returns null for them (which logged a misleading
+    // "spell_dbc row missing or immune?" warning, e.g. from OnPlayerReleasedGhost). The buff
+    // re-applies naturally on resurrect/remount.
+    if (!_enabled || !player || !entry || !player->IsAlive())
         return;
 
     size_t typeIdx = static_cast<size_t>(entry->type);
