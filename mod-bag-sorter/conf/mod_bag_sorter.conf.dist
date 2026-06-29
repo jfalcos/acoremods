@@ -1,0 +1,30 @@
+[worldserver]
+
+########################################
+# mod-bag-sorter configuration
+########################################
+#
+#    BagSorter.Enable
+#        Description: Master switch. Enables the "Organize my bags" innkeeper
+#                     gossip option and the .sortbags command.
+#        Default:     1 (enabled)
+#
+
+BagSorter.Enable = 1
+
+#
+#    BagSorter.MergeStacks
+#        Description: Consolidate partial stacks of the same item (within the
+#                     same bag pool) before sorting. 0 leaves stacks untouched.
+#        Default:     1 (enabled)
+#
+
+BagSorter.MergeStacks = 1
+
+#
+#    BagSorter.Announce
+#        Description: Whisper a one-line confirmation after sorting.
+#        Default:     1 (enabled)
+#
+
+BagSorter.Announce = 1

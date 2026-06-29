@@ -6,6 +6,7 @@ A collection of custom [AzerothCore](https://www.azerothcore.org/) (WotLK 3.3.5a
 
 | Module | Description |
 | ------ | ----------- |
+| `mod-bag-sorter` | Sort your carried bags from any innkeeper's gossip, or with `.sortbags`. |
 | `mod-custom-items` | Custom items with no client patch (donor-appearance framework). Requires [core patch](core-patches/). |
 | `mod-dynamic-ah` | Dynamic auction house. |
 | `mod-living-world` | Dynamic world / living-world behaviors. |
@@ -28,7 +29,7 @@ Clone this repo anywhere, then junction each module into your AzerothCore `modul
 ```powershell
 $src = "<path-to>\azerothcore-wotlk\modules"
 $dst = "<path-to>\acoremods"
-foreach ($m in @("mod-custom-items","mod-dynamic-ah","mod-living-world","mod-mount-progression","mod-terror-zones")) {
+foreach ($m in @("mod-bag-sorter","mod-custom-items","mod-dynamic-ah","mod-living-world","mod-mount-progression","mod-terror-zones")) {
   New-Item -ItemType Junction -Path (Join-Path $src $m) -Target (Join-Path $dst $m)
 }
 ```
@@ -51,7 +52,7 @@ git apply <path-to>/acoremods/core-patches/acore-core-hooks.patch
 ```
 
 See [core-patches/](core-patches/) for the full per-module breakdown of what the patch
-changes. `mod-living-world` and `mod-dynamic-ah` need no core changes.
+changes. `mod-bag-sorter`, `mod-living-world`, and `mod-dynamic-ah` need no core changes.
 
 ### Step 3 — Build & database
 
@@ -61,4 +62,4 @@ Each module carries its own SQL under `mod-*/data/sql/db-world/` and `db-charact
 AzerothCore's DB updater applies these automatically on worldserver startup (with the
 updater enabled — `Updates.EnableDatabases` / `AutoSetup`), so there's no manual import
 step. `mod-custom-items`, `mod-mount-progression`, `mod-terror-zones`, and `mod-living-world`
-all ship schema; `mod-dynamic-ah` uses only core tables.
+all ship schema; `mod-dynamic-ah` and `mod-bag-sorter` use only core tables.
