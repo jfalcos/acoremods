@@ -42,6 +42,27 @@ TerrorZones.RotationIntervalSeconds = 3600
 
 TerrorZones.SlotCount = 1
 
+#    TerrorZones.Selection.OnePerContinent
+#        Description: When 1, ignore SlotCount and empower exactly one zone per
+#                     continent that has pool zones (Eastern Kingdoms, Kalimdor,
+#                     Outland, Northrend) — typically four zones terrorized at
+#                     once, one on each landmass. Each continent's zone is drawn
+#                     with the same level/recency weighting as the global mode.
+#                     When 0, the classic global SlotCount selection is used.
+#        Default:     1
+
+TerrorZones.Selection.OnePerContinent = 1
+
+#    TerrorZones.Innkeeper.Gossip.Enable
+#        Description: When 1, every innkeeper gains a "Terror Zones" gossip
+#                     option that shows what's currently terrorized, the next
+#                     rotation time, recent history, and a how-it-works blurb —
+#                     the same info as the `.zones` commands, available to all
+#                     players. Coexists with other modules' innkeeper options.
+#        Default:     1
+
+TerrorZones.Innkeeper.Gossip.Enable = 1
+
 #
 #    Recency dampening. The last RecencyWindow ticks' zones are multiplied by
 #    RecencyDampenMultiplier (not zeroed) so tiny pools still roll repeats when
@@ -592,6 +613,20 @@ TerrorZones.Events.Type.Champion.Enable  = 0
 #    (terror_zones_event_boss_loot table, not landed in Slice 6); 0 disables
 #    bonus drops regardless of curation.
 #
+
+#    TerrorZones.Events.WorldBoss.AlwaysSpawn
+#        Description: When 1, every empowered zone is GUARANTEED a world boss for
+#                     the full rotation window. This bypasses the FireChance gate
+#                     and the world-boss/node-surge weighted draw for the first
+#                     event: the boss is up at rotation start and despawns when
+#                     the zone rotates off. An optional second event (e.g. a node
+#                     surge) can still roll on top. Requires curated boss content
+#                     in terror_zones_event_bosses for the empowered zone — zones
+#                     with no matching boss row log a warning and get no boss.
+#                     When 0, world bosses are probabilistic (classic behavior).
+#        Default:     1
+
+TerrorZones.Events.WorldBoss.AlwaysSpawn         = 1
 
 TerrorZones.Events.WorldBoss.LootBaseChance      = 1.0
 TerrorZones.Events.WorldBoss.ScaleMult           = 5.0

@@ -8,6 +8,7 @@ void AddTerrorZonesCommandScripts();
 void AddTerrorZonesCreatureScripts();
 void AddTerrorZonesRewardScripts();
 void AddTerrorZonesUnitScripts();
+void AddTerrorZonesGossipScripts();
 
 namespace
 {
@@ -46,4 +47,5 @@ void Addmod_terror_zonesScripts()
     AddTerrorZonesCreatureScripts();
     AddTerrorZonesRewardScripts();
     AddTerrorZonesUnitScripts();
+    AddTerrorZonesGossipScripts();
 }

@@ -11,6 +11,7 @@
 #include "Chat.h"
 #include "Config.h"
 #include "DatabaseEnv.h"
+#include "DBCStores.h"
 #include "Group.h"
 #include "GroupReference.h"
 #include "Log.h"
@@ -61,6 +62,10 @@ void TerrorZonesMgr::LoadConfig()
     _slotCount = sConfigMgr->GetOption<uint32>("TerrorZones.SlotCount", 1);
     if (_slotCount == 0)
         _slotCount = 1;
+    _onePerContinent = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Selection.OnePerContinent", true);
+    _innkeeperGossipEnable = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Innkeeper.Gossip.Enable", true);
     _recencyWindow = sConfigMgr->GetOption<uint32>(
         "TerrorZones.RecencyWindow", 6);
     _recencyMultiplier = sConfigMgr->GetOption<float>(
@@ -320,6 +325,8 @@ void TerrorZonesMgr::LoadConfig()
     // --- Slice 6 — dynamic events ---
     _eventsEnabled = sConfigMgr->GetOption<bool>(
         "TerrorZones.Events.Enable", true);
+    _eventBossAlwaysSpawn = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Events.WorldBoss.AlwaysSpawn", true);
 
     _eventCfg.fireChance = sConfigMgr->GetOption<float>(
         "TerrorZones.Events.FireChance", 0.60f);
@@ -698,6 +705,18 @@ void TerrorZonesMgr::LoadPool()
         e.levelMin    = f[2].Get<uint16>();
         e.levelMax    = f[3].Get<uint16>();
         e.enabled     = f[4].Get<uint8>() != 0;
+        // Resolve the zone's continent (map id) from the core DBC so
+        // SelectZonesPerContinent can empower one zone per continent.
+        if (AreaTableEntry const* area = sAreaTableStore.LookupEntry(e.zoneId))
+            e.continent = area->mapid;
+        else
+        {
+            e.continent = 0;
+            LOG_WARN("module",
+                     "mod-terror-zones: pool zone {} ({}) has no AreaTable "
+                     "entry; defaulting continent to 0 (Eastern Kingdoms).",
+                     e.zoneId, e.displayName);
+        }
         _poolIndex[e.zoneId] = _pool.size();
         _pool.push_back(std::move(e));
     } while (result->NextRow());
@@ -946,11 +965,15 @@ void TerrorZonesMgr::RunRotation(uint64 tickAt, bool announce)
         }
     }
 
-    // Recent zone IDs: last slotCount*recencyWindow rows.
+    // Recent zone IDs: last slotCount*recencyWindow rows. In
+    // per-continent mode the effective slot count is the number of
+    // continents (bounded by 4 in 3.3.5a), so use that to keep the
+    // dampening window covering a few full rotations.
     std::vector<uint32> recent;
-    if (_recencyWindow > 0 && _slotCount > 0)
+    uint32 effectiveSlots = _onePerContinent ? 4u : _slotCount;
+    if (_recencyWindow > 0 && effectiveSlots > 0)
     {
-        uint32 limit = _recencyWindow * _slotCount;
+        uint32 limit = _recencyWindow * effectiveSlots;
         QueryResult r = CharacterDatabase.Query(
             "SELECT zone_id FROM terror_zones_history "
             "ORDER BY tick_at DESC, slot_index ASC LIMIT {}", limit);
@@ -975,8 +998,9 @@ void TerrorZonesMgr::RunRotation(uint64 tickAt, bool announce)
     rngSeed ^= tickAt * 0x9E3779B97F4A7C15ULL;
     StdRng rng(rngSeed);
 
-    std::vector<uint32> picks =
-        SelectZones(_pool, targets, recent, cfg, rng);
+    std::vector<uint32> picks = _onePerContinent
+        ? SelectZonesPerContinent(_pool, targets, recent, cfg, rng)
+        : SelectZones(_pool, targets, recent, cfg, rng);
 
     // Roll one flavor per slot, independent of zone selection (plan §2.2).
     std::vector<Flavor> pickFlavors;

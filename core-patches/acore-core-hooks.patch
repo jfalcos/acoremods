@@ -1,5 +1,5 @@
 diff --git a/src/server/game/Entities/Object/Object.cpp b/src/server/game/Entities/Object/Object.cpp
-index 9cd58f197..763b36a5a 100644
+index 793cb8ed2..df68ee5f8 100644
 --- a/src/server/game/Entities/Object/Object.cpp
 +++ b/src/server/game/Entities/Object/Object.cpp
 @@ -501,7 +501,7 @@ void Object::BuildValuesUpdate(uint8 updateType, ByteBuffer* data, Player* targe
@@ -12,10 +12,10 @@ index 9cd58f197..763b36a5a 100644
      }
  
 diff --git a/src/server/game/Entities/Player/PlayerQuest.cpp b/src/server/game/Entities/Player/PlayerQuest.cpp
-index edfe48c9a..28565d53b 100644
+index 57735685e..74a793987 100644
 --- a/src/server/game/Entities/Player/PlayerQuest.cpp
 +++ b/src/server/game/Entities/Player/PlayerQuest.cpp
-@@ -764,6 +764,8 @@ void Player::RewardQuest(Quest const* quest, uint32 reward, Object* questGiver,
+@@ -766,6 +766,8 @@ void Player::RewardQuest(Quest const* quest, uint32 reward, Object* questGiver,
          moneyRew += rewOrReqMoney;
      }
  
@@ -25,10 +25,10 @@ index edfe48c9a..28565d53b 100644
      {
          ModifyMoney(moneyRew);
 diff --git a/src/server/game/Globals/ObjectMgr.cpp b/src/server/game/Globals/ObjectMgr.cpp
-index f1e100bba..386eaf5b3 100644
+index 849ee2627..437eec6b8 100644
 --- a/src/server/game/Globals/ObjectMgr.cpp
 +++ b/src/server/game/Globals/ObjectMgr.cpp
-@@ -3853,6 +3853,24 @@ ItemTemplate const* ObjectMgr::GetItemTemplate(uint32 entry)
+@@ -3935,6 +3935,24 @@ ItemTemplate const* ObjectMgr::GetItemTemplate(uint32 entry)
      return entry < _itemTemplateStoreFast.size() ? _itemTemplateStoreFast[entry] : nullptr;
  }
  
@@ -54,10 +54,10 @@ index f1e100bba..386eaf5b3 100644
  {
      uint32 oldMSTime = getMSTime();
 diff --git a/src/server/game/Globals/ObjectMgr.h b/src/server/game/Globals/ObjectMgr.h
-index 8a4fbbef2..6e4f80f93 100644
+index ffee8b69a..8e8511a3b 100644
 --- a/src/server/game/Globals/ObjectMgr.h
 +++ b/src/server/game/Globals/ObjectMgr.h
-@@ -782,6 +782,13 @@ public:
+@@ -785,6 +785,13 @@ public:
      ItemTemplate const* GetItemTemplate(uint32 entry);
      [[nodiscard]] ItemTemplateContainer const* GetItemTemplateStore() const { return &_itemTemplateStore; }
      [[nodiscard]] std::vector<ItemTemplate*> const* GetItemTemplateStoreFast() const { return &_itemTemplateStoreFast; }
@@ -72,7 +72,7 @@ index 8a4fbbef2..6e4f80f93 100644
      uint32 GetModelForTotem(SummonSlot totemSlot, Races race) const;
  
 diff --git a/src/server/game/Handlers/ItemHandler.cpp b/src/server/game/Handlers/ItemHandler.cpp
-index c2cc245b6..316965d1a 100644
+index 93430dbe9..ef9a8f83c 100644
 --- a/src/server/game/Handlers/ItemHandler.cpp
 +++ b/src/server/game/Handlers/ItemHandler.cpp
 @@ -395,6 +395,7 @@ void WorldSession::HandleItemQuerySingleOpcode(WorldPacket& recvData)
@@ -92,6 +92,33 @@ index c2cc245b6..316965d1a 100644
          queryData << pProto->Class;
          queryData << pProto->SubClass;
          queryData << pProto->SoundOverrideSubclass;
+diff --git a/src/server/game/Scripting/ScriptDefines/AllCreatureScript.h b/src/server/game/Scripting/ScriptDefines/AllCreatureScript.h
+index d734f06c3..25daa30ca 100644
+--- a/src/server/game/Scripting/ScriptDefines/AllCreatureScript.h
++++ b/src/server/game/Scripting/ScriptDefines/AllCreatureScript.h
+@@ -66,6 +66,22 @@ public:
+      */
+     [[nodiscard]] virtual bool CanCreatureGossipHello(Player* /*player*/, Creature* /*creature*/) { return false; }
+ 
++    /**
++     * @brief Additive gossip-hello hook (acoremods). Unlike CanCreatureGossipHello — which
++     * short-circuits at the first script that returns true — every registered AllCreatureScript
++     * gets this call on a single shared, already-prepared gossip menu, letting multiple modules
++     * append their own options to the same NPC (e.g. innkeepers) without clobbering each other.
++     * The core prepares the native menu before the dispatch and sends it once afterwards;
++     * implementers must ONLY append items via AddGossipItemFor (no PrepareGossipMenu /
++     * SendPreparedGossip / ClearGossipMenuFor).
++     *
++     * @param player Contains information about the Player
++     * @param creature Contains information about the Creature
++     *
++     * @return True if this script appended at least one item (so the core sends the menu).
++     */
++    [[nodiscard]] virtual bool OnCreatureGossipHelloAppend(Player* /*player*/, Creature* /*creature*/) { return false; }
++
+     /**
+      * @brief This hook called when a player selects a gossip item in the creature's gossip menu.
+      *
 diff --git a/src/server/game/Scripting/ScriptDefines/AllItemScript.cpp b/src/server/game/Scripting/ScriptDefines/AllItemScript.cpp
 index ecc51c5cd..e45d55126 100644
 --- a/src/server/game/Scripting/ScriptDefines/AllItemScript.cpp
@@ -184,11 +211,81 @@ index c28cf6acb..52c05b124 100644
  };
  
  #endif
+diff --git a/src/server/game/Scripting/ScriptDefines/CreatureScript.cpp b/src/server/game/Scripting/ScriptDefines/CreatureScript.cpp
+index 6e4f36927..52abf1ed1 100644
+--- a/src/server/game/Scripting/ScriptDefines/CreatureScript.cpp
++++ b/src/server/game/Scripting/ScriptDefines/CreatureScript.cpp
+@@ -17,6 +17,8 @@
+ 
+ #include "CreatureScript.h"
+ #include "AllCreatureScript.h"
++#include "Creature.h"
++#include "Player.h"
+ #include "ScriptMgr.h"
+ #include "ScriptMgrMacros.h"
+ #include "ScriptedGossip.h"
+@@ -36,9 +38,55 @@ bool ScriptMgr::OnGossipHello(Player* player, Creature* creature)
+         return true;
+     }
+ 
++    // acoremods — additive gossip-hello. Let EVERY AllCreatureScript append
++    // its own options to a single shared menu so multiple modules coexist
++    // (instead of first-wins). The base menu MUST be built the same way it
++    // normally would be, so the native options keep the action ids their own
++    // selection handler expects:
++    //   * scripted NPC (e.g. innkeepers run npc_innkeeper, which AddGossipItemFor's
++    //     its options with GOSSIP_ACTION_* and dispatches them in OnGossipSelect):
++    //     pre-append our items, then let the creature's own OnGossipHello add its
++    //     options on top and send the whole menu. Our items ride along; the native
++    //     options stay routed to the creature script's OnGossipSelect.
++    //   * non-scripted NPC: build the DB gossip menu via PrepareGossipMenu (its
++    //     native options dispatch through Player::OnGossipSelect), append, send.
+     auto tempScript = ScriptRegistry<CreatureScript>::GetScriptById(creature->GetScriptId());
++
++    if (tempScript)
++    {
++        ClearGossipMenuFor(player);
++        for (auto const& [scriptID, script] : ScriptRegistry<AllCreatureScript>::ScriptPointerList)
++        {
++            script->OnCreatureGossipHelloAppend(player, creature);
++        }
++        // The creature's own hello adds its options (without clearing, for
++        // gossip scripts like npc_innkeeper) and sends the full menu.
++        return tempScript->OnGossipHello(player, creature);
++    }
++
++    if (!ScriptRegistry<AllCreatureScript>::ScriptPointerList.empty())
++    {
++        bool appended = false;
++        player->PrepareGossipMenu(creature, creature->GetGossipMenuId(), true);
++        for (auto const& [scriptID, script] : ScriptRegistry<AllCreatureScript>::ScriptPointerList)
++        {
++            if (script->OnCreatureGossipHelloAppend(player, creature))
++            {
++                appended = true;
++            }
++        }
++
++        if (appended)
++        {
++            player->SendPreparedGossip(creature);
++            return true;
++        }
++    }
++
++    // Nothing appended and no creature script — discard our prepared menu and
++    // let the caller (NPCHandler) send the default gossip.
+     ClearGossipMenuFor(player);
+-    return tempScript ? tempScript->OnGossipHello(player, creature) : false;
++    return false;
+ }
+ 
+ bool ScriptMgr::OnGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action)
 diff --git a/src/server/game/Scripting/ScriptDefines/PlayerScript.cpp b/src/server/game/Scripting/ScriptDefines/PlayerScript.cpp
-index 09e295f77..632131031 100644
+index 5ee4be5e1..dfe5b6f81 100644
 --- a/src/server/game/Scripting/ScriptDefines/PlayerScript.cpp
 +++ b/src/server/game/Scripting/ScriptDefines/PlayerScript.cpp
-@@ -485,6 +485,11 @@ void ScriptMgr::OnPlayerQuestComputeXP(Player* player, Quest const* quest, uint3
+@@ -488,6 +488,11 @@ void ScriptMgr::OnPlayerQuestComputeXP(Player* player, Quest const* quest, uint3
      CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_QUEST_COMPUTE_EXP, script->OnPlayerQuestComputeXP(player, quest, xpValue));
  }
  
@@ -201,7 +298,7 @@ index 09e295f77..632131031 100644
  {
      CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_BEFORE_STORE_OR_EQUIP_NEW_ITEM, script->OnPlayerBeforeStoreOrEquipNewItem(player, vendorslot, item, count, bag, slot, pProto, pVendor, crItem, bStore));
 diff --git a/src/server/game/Scripting/ScriptDefines/PlayerScript.h b/src/server/game/Scripting/ScriptDefines/PlayerScript.h
-index eb253fd70..c1d27f25c 100644
+index b718b81c5..e8eee1278 100644
 --- a/src/server/game/Scripting/ScriptDefines/PlayerScript.h
 +++ b/src/server/game/Scripting/ScriptDefines/PlayerScript.h
 @@ -112,6 +112,7 @@ enum PlayerHook
@@ -212,7 +309,7 @@ index eb253fd70..c1d27f25c 100644
      PLAYERHOOK_ON_BEFORE_DURABILITY_REPAIR,
      PLAYERHOOK_ON_BEFORE_BUY_ITEM_FROM_VENDOR,
      PLAYERHOOK_ON_BEFORE_STORE_OR_EQUIP_NEW_ITEM,
-@@ -452,6 +453,11 @@ public:
+@@ -455,6 +456,11 @@ public:
      // Called after computing the XP reward value for a quest
      virtual void OnPlayerQuestComputeXP(Player* /*player*/, Quest const* /*quest*/, uint32& /*xpValue*/) { }
  
@@ -328,7 +425,7 @@ index 75589426e..5415ff386 100644
  
  #endif
 diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
-index ca2b35822..f74ebfcb5 100644
+index 9fd4ff356..9da3426fb 100644
 --- a/src/server/game/Scripting/ScriptMgr.h
 +++ b/src/server/game/Scripting/ScriptMgr.h
 @@ -195,6 +195,8 @@ public: /* WorldScript */
@@ -361,7 +458,7 @@ index ca2b35822..f74ebfcb5 100644
      void OnPlayerBeforeDurabilityRepair(Player* player, ObjectGuid npcGUID, ObjectGuid itemGUID, float& discountMod, uint8 guildBank);
      void OnPlayerBeforeBuyItemFromVendor(Player* player, ObjectGuid vendorguid, uint32 vendorslot, uint32& item, uint8 count, uint8 bag, uint8 slot);
      void OnPlayerBeforeStoreOrEquipNewItem(Player* player, uint32 vendorslot, uint32& item, uint8 count, uint8 bag, uint8 slot, ItemTemplate const* pProto, Creature* pVendor, VendorItem const* crItem, bool bStore);
-@@ -572,6 +581,7 @@ public: /* UnitScript */
+@@ -575,6 +584,7 @@ public: /* UnitScript */
      void OnBeforeRollMeleeOutcomeAgainst(Unit const* attacker, Unit const* victim, WeaponAttackType attType, int32& attackerMaxSkillValueForLevel, int32& victimMaxSkillValueForLevel, int32& attackerWeaponSkill, int32& victimDefenseSkill, int32& crit_chance, int32& miss_chance, int32& dodge_chance, int32& parry_chance, int32& block_chance);
      void OnAuraApply(Unit* /*unit*/, Aura* /*aura*/);
      void OnAuraRemove(Unit* unit, AuraApplication* aurApp, AuraRemoveMode mode);
@@ -370,7 +467,7 @@ index ca2b35822..f74ebfcb5 100644
      bool CanSetPhaseMask(Unit const* unit, uint32 newPhaseMask, bool update);
      bool IsCustomBuildValuesUpdate(Unit const* unit, uint8 updateType, ByteBuffer& fieldBuffer, Player const* target, uint16 index);
 diff --git a/src/server/game/Spells/Auras/SpellAuras.cpp b/src/server/game/Spells/Auras/SpellAuras.cpp
-index 3ca928b47..66a68f772 100644
+index 5f2b887f0..ec38d9c4c 100644
 --- a/src/server/game/Spells/Auras/SpellAuras.cpp
 +++ b/src/server/game/Spells/Auras/SpellAuras.cpp
 @@ -197,7 +197,9 @@ void AuraApplication::BuildUpdatePacket(ByteBuffer& data, bool remove) const
@@ -385,7 +482,7 @@ index 3ca928b47..66a68f772 100644
      if (aura->GetMaxDuration() > 0 && !aura->GetSpellInfo()->HasAttribute(SPELL_ATTR5_DO_NOT_DISPLAY_DURATION))
          flags |= AFLAG_DURATION;
 diff --git a/src/server/game/World/World.cpp b/src/server/game/World/World.cpp
-index cc951abd0..547115f49 100644
+index 72e46aa0c..0a72ceeba 100644
 --- a/src/server/game/World/World.cpp
 +++ b/src/server/game/World/World.cpp
 @@ -378,6 +378,7 @@ void World::SetInitialWorldSettings()
@@ -396,7 +493,7 @@ index cc951abd0..547115f49 100644
      DetectDBCLang();
  
      // Load cinematic cameras
-@@ -520,6 +521,7 @@ void World::SetInitialWorldSettings()
+@@ -523,6 +524,7 @@ void World::SetInitialWorldSettings()
  
      LOG_INFO("server.loading", "Loading Items...");                         // must be after LoadRandomEnchantmentsTable and LoadPageTexts
      sObjectMgr->LoadItemTemplates();

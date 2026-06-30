@@ -135,6 +135,50 @@ std::vector<uint32> SelectZones(
     return picks;
 }
 
+std::vector<uint32> SelectZonesPerContinent(
+    std::vector<PoolEntry> const& pool,
+    std::vector<uint8> const& targets,
+    std::vector<uint32> const& recentZoneIds,
+    SelectionConfig const& cfg,
+    IRng& rng)
+{
+    std::vector<uint32> picks;
+    if (pool.empty())
+        return picks;
+
+    // Distinct continents (ascending map-id) so a continent's slot
+    // index stays stable across ticks. Only continents that carry at
+    // least one enabled zone produce a slot.
+    std::vector<uint32> continents;
+    for (PoolEntry const& z : pool)
+    {
+        if (!z.enabled)
+            continue;
+        if (std::find(continents.begin(), continents.end(), z.continent)
+            == continents.end())
+            continents.push_back(z.continent);
+    }
+    std::sort(continents.begin(), continents.end());
+
+    // Reuse the weighted single-pick inside each continent's sub-pool.
+    SelectionConfig oneSlot = cfg;
+    oneSlot.slotCount = 1;
+
+    for (uint32 cont : continents)
+    {
+        std::vector<PoolEntry> sub;
+        for (PoolEntry const& z : pool)
+            if (z.continent == cont)
+                sub.push_back(z);
+        std::vector<uint32> one =
+            SelectZones(sub, targets, recentZoneIds, oneSlot, rng);
+        if (!one.empty())
+            picks.push_back(one.front());
+    }
+
+    return picks;
+}
+
 // -----------------------------------------------------------------------------
 // Slice 2 — combat scaling (pure helpers)
 // -----------------------------------------------------------------------------

@@ -218,6 +218,12 @@ struct PoolEntry
     uint16 levelMin;
     uint16 levelMax;
     bool   enabled;
+    // Continent map id (AreaTableEntry.mapid): 0 EK / 1 Kalimdor /
+    // 530 Outland / 571 Northrend. Resolved at LoadPool from the
+    // core DBC store and used by SelectZonesPerContinent to empower
+    // one zone per continent. 0 is also the EK continent, so a
+    // failed lookup (logged) folds harmlessly into the EK group.
+    uint32 continent = 0;
 };
 
 struct SelectionConfig
@@ -485,6 +491,20 @@ std::vector<uint32> SelectZones(
     SelectionConfig const& cfg,
     IRng& rng);
 
+// One-zone-per-continent variant. Partitions the enabled pool by
+// `PoolEntry::continent`, walks the continents in ascending map-id
+// order (so a continent's slot index is stable across ticks), and
+// runs the same weighted single-pick (`SelectZones` with slotCount=1)
+// inside each continent's sub-pool. Returns one zone per non-empty
+// continent — `cfg.slotCount` is ignored here. Recency dampening uses
+// the shared `recentZoneIds` set. Pure + unit-tested.
+std::vector<uint32> SelectZonesPerContinent(
+    std::vector<PoolEntry> const& pool,
+    std::vector<uint8> const& targets,
+    std::vector<uint32> const& recentZoneIds,
+    SelectionConfig const& cfg,
+    IRng& rng);
+
 struct ActiveSlot
 {
     uint32 zoneId;
@@ -519,6 +539,8 @@ public:
 
     bool IsEnabled() const { return _enabled; }
     bool IsDebug() const { return _debug; }
+    bool IsInnkeeperGossipEnabled() const
+    { return _enabled && _innkeeperGossipEnable; }
     uint32 GetIntervalSec() const { return _intervalSec; }
     uint32 GetSlotCount() const { return _slotCount; }
 
@@ -936,6 +958,12 @@ private:
     bool _debug = false;
     uint32 _intervalSec = 3600;
     uint32 _slotCount = 1;
+    // When true, ignore _slotCount and empower exactly one zone per
+    // continent that has pool zones (SelectZonesPerContinent).
+    bool _onePerContinent = true;
+    // Innkeeper gossip surface (TerrorZonesGossip.cpp). Master gate
+    // for appending the "Terror Zones" option to innkeeper menus.
+    bool _innkeeperGossipEnable = true;
     uint32 _recencyWindow = 6;
     double _recencyMultiplier = 0.1;
     uint32 _levelWindow = 5;
@@ -1035,6 +1063,11 @@ private:
 
     // Slice 6 — dynamic events.
     bool _eventsEnabled = true;
+    // When true, every empowered slot is guaranteed a world boss for
+    // the full rotation window (ScheduleEvents bypasses FireChance +
+    // SelectEventType for the first event). Optional second events
+    // still roll on top.
+    bool _eventBossAlwaysSpawn = true;
     EventScheduleConfig _eventCfg{};
     uint32 _eventRetentionHours = 24;
     float  _eventBossLootBaseChance = 1.0f;     // kill-switch

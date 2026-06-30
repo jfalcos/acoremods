@@ -379,10 +379,6 @@ void TerrorZonesMgr::ScheduleEvents(uint64 tickAt,
         StdRng rng(EventRotationSeed(tickAt,
                                      static_cast<uint32>(slot.slotIndex)));
 
-        // First-event coin flip.
-        if (!ShouldFireSecondEvent(cfg.fireChance, rng))
-            continue;
-
         auto pickDef = [&](EventType type, uint32 zoneId,
                            uint32& outDefId, uint32& outMapId,
                            float& outX, float& outY, float& outZ,
@@ -471,7 +467,69 @@ void TerrorZonesMgr::ScheduleEvents(uint64 tickAt,
 
         uint32 offsets[2] = { cfg.firstOffsetSec, cfg.secondOffsetSec };
         uint32 slotEventId = 0;
-        for (uint32 e = 0; e < 2; ++e)
+
+        // Guaranteed full-rotation world boss
+        // (TerrorZones.Events.WorldBoss.AlwaysSpawn). Bypasses the
+        // FireChance gate and the SelectEventType weighted draw: every
+        // empowered slot gets a world boss that is up at rotation start
+        // and lasts the whole rotation window. The optional second
+        // event still rolls below. When the zone has no curated boss
+        // content, we log and fall back to the normal probabilistic
+        // path so the slot can still get a node surge.
+        bool bossScheduled = false;
+        if (_eventBossAlwaysSpawn)
+        {
+            uint32 bDefId = 0, bMapId = 0;
+            float bx = 0.0f, by = 0.0f, bz = 0.0f;
+            std::string bName;
+            if (pickDef(EVENT_WORLD_BOSS, slot.zoneId, bDefId, bMapId,
+                        bx, by, bz, bName))
+            {
+                uint32 trackerQuestId = 0;
+                for (EventBossDef const& d : bossDefs)
+                    if (d.id == bDefId)
+                    {
+                        trackerQuestId = d.trackerQuestId;
+                        break;
+                    }
+
+                ActiveEvent evt{};
+                evt.tickAt         = tickAt;
+                evt.slotIndex      = slot.slotIndex;
+                evt.eventId        = slotEventId++;
+                evt.type           = EVENT_WORLD_BOSS;
+                evt.state          = EVENT_STATE_PENDING;
+                evt.startsAt       = tickAt;                 // up at rotation start
+                evt.endsAt         = tickAt + _intervalSec;  // full rotation window
+                evt.zoneId         = slot.zoneId;
+                evt.mapId          = bMapId;
+                evt.definitionId   = bDefId;
+                evt.anchorX        = bx;
+                evt.anchorY        = by;
+                evt.anchorZ        = bz;
+                evt.displayName    = std::move(bName);
+                evt.trackerQuestId = trackerQuestId;
+                newEvents.push_back(std::move(evt));
+                bossScheduled = true;
+            }
+            else
+            {
+                LOG_WARN("module",
+                         "mod-terror-zones: AlwaysSpawn world boss — no "
+                         "curated boss content for zone={} (scaledLevel={}, "
+                         "tick_at={}, slot={}); no boss this rotation.",
+                         slot.zoneId, scaledLevel, tickAt, slot.slotIndex);
+            }
+        }
+
+        // First-event coin flip — skipped when the guaranteed boss
+        // already filled the first event slot (the optional second
+        // event still rolls below).
+        if (!bossScheduled && !ShouldFireSecondEvent(cfg.fireChance, rng))
+            continue;
+
+        uint32 startEvent = bossScheduled ? 1u : 0u;
+        for (uint32 e = startEvent; e < 2; ++e)
         {
             if (e == 1 && !ShouldFireSecondEvent(cfg.secondChance, rng))
                 break;
@@ -1099,7 +1157,16 @@ void TerrorZonesMgr::SpawnWorldBoss(ActiveEvent& evt,
         return;
     }
     Position pos{ def.anchorX, def.anchorY, def.anchorZ, def.anchorO };
-    uint32 durMs = _eventCfg.durationSec * 1000;
+    // Summon for the event's actual remaining window rather than the
+    // global DurationSec: the AlwaysSpawn boss runs the FULL rotation
+    // (endsAt = tickAt + intervalSec), which is longer than DurationSec.
+    // For normal events (endsAt = startsAt + DurationSec, fired at
+    // ~startsAt) this resolves to ~DurationSec, so behavior is unchanged.
+    uint64 nowSec = static_cast<uint64>(::time(nullptr));
+    uint32 windowSec = (evt.endsAt > nowSec)
+        ? static_cast<uint32>(evt.endsAt - nowSec)
+        : _eventCfg.durationSec;
+    uint32 durMs = windowSec * 1000;
 
     // Force the scaling override before SummonCreature. The hook
     // fires synchronously inside Create → SelectLevel on this same
@@ -1170,7 +1237,7 @@ void TerrorZonesMgr::SpawnWorldBoss(ActiveEvent& evt,
         GameObject* beacon = map->SummonGameObject(
             _eventBossBeaconGoId, def.anchorX, def.anchorY, def.anchorZ,
             def.anchorO, 0.0f, 0.0f, 0.0f, 0.0f,
-            _eventCfg.durationSec, /*checkTransport*/ false);
+            windowSec, /*checkTransport*/ false);
         if (beacon)
             evt.spawnedGameObjects.push_back(beacon->GetGUID());
         else if (_debug)

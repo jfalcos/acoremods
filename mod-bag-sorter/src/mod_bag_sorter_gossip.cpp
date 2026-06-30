@@ -63,18 +63,17 @@ class mod_bag_sorter_creature : public AllCreatureScript
 public:
     mod_bag_sorter_creature() : AllCreatureScript("mod_bag_sorter_creature") { }
 
-    bool CanCreatureGossipHello(Player* player, Creature* creature) override
+    bool OnCreatureGossipHelloAppend(Player* player, Creature* creature) override
     {
         if (!BagSorter::settings.Enable || !creature->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER))
             return false;
 
-        // Rebuild the innkeeper's native menu (rest/bind, vendor, etc.) first,
-        // then append our option - PrepareGossipMenu clears the menu, so order
-        // matters.
-        player->PrepareGossipMenu(creature, creature->GetGossipMenuId(), true);
+        // Additive hook: the core has already prepared the innkeeper's native
+        // menu (rest/bind, vendor, etc.) and sends it once every module has
+        // appended. We only add our option - no Prepare/Send here, so we
+        // coexist with other modules (e.g. mod-terror-zones) on the same NPC.
         AddGossipItemFor(player, GOSSIP_ICON_TABARD, "Organize my bags", SENDER_BAGSORT, ACTION_OPEN);
-        player->SendPreparedGossip(creature);
-        return true; // we handled the hello
+        return true; // we appended an item
     }
 
     bool CanCreatureGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action) override

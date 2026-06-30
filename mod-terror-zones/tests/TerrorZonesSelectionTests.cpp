@@ -242,3 +242,84 @@ TEST(TerrorZonesSelection, DisabledZonesExcluded)
         EXPECT_EQ(picks[0], 100u);
     }
 }
+
+namespace
+{
+    // Pool spanning three continents (0 EK, 1 Kalimdor, 571 Northrend),
+    // two zones each. The 6th brace field is PoolEntry::continent.
+    std::vector<PoolEntry> MultiContinentPool()
+    {
+        return {
+            {100, "EK-A",   10, 20, true,  0},
+            {101, "EK-B",   30, 40, true,  0},
+            {200, "Kal-A",  10, 20, true,  1},
+            {201, "Kal-B",  30, 40, true,  1},
+            {300, "Nor-A",  68, 78, true,  571},
+            {301, "Nor-B",  70, 80, true,  571},
+        };
+    }
+}
+
+// One zone per continent: exactly one pick per non-empty continent,
+// and every pick comes from a distinct continent.
+TEST(TerrorZonesSelection, PerContinentOnePerContinent)
+{
+    std::vector<PoolEntry> pool = MultiContinentPool();
+    SelectionConfig cfg = DefaultCfg();
+    XorshiftRng rng(0xC0FFEEULL);
+
+    for (int i = 0; i < 200; ++i)
+    {
+        auto picks = SelectZonesPerContinent(pool, {}, {}, cfg, rng);
+        ASSERT_EQ(picks.size(), 3u) << "iteration " << i;
+
+        std::vector<uint32> conts;
+        for (uint32 z : picks)
+            for (PoolEntry const& e : pool)
+                if (e.zoneId == z)
+                    conts.push_back(e.continent);
+        std::sort(conts.begin(), conts.end());
+        // Distinct continents, ascending order (0, 1, 571).
+        EXPECT_EQ(conts, (std::vector<uint32>{0u, 1u, 571u}));
+    }
+}
+
+// A continent whose only zones are disabled produces no slot.
+TEST(TerrorZonesSelection, PerContinentSkipsEmptyContinent)
+{
+    std::vector<PoolEntry> pool = {
+        {100, "EK-A",  10, 20, true,  0},
+        {200, "Kal-X", 10, 20, false, 1},   // only Kalimdor zone, disabled
+        {300, "Nor-A", 70, 80, true,  571},
+    };
+    SelectionConfig cfg = DefaultCfg();
+    XorshiftRng rng(7);
+
+    auto picks = SelectZonesPerContinent(pool, {}, {}, cfg, rng);
+    ASSERT_EQ(picks.size(), 2u);
+    // No Kalimdor zone should appear.
+    for (uint32 z : picks)
+        EXPECT_NE(z, 200u);
+}
+
+// Deterministic: same pool + same seed → same picks, in continent
+// ascending order.
+TEST(TerrorZonesSelection, PerContinentDeterministicOrder)
+{
+    std::vector<PoolEntry> pool = MultiContinentPool();
+    SelectionConfig cfg = DefaultCfg();
+    XorshiftRng a(123), b(123);
+    auto p1 = SelectZonesPerContinent(pool, {}, {}, cfg, a);
+    auto p2 = SelectZonesPerContinent(pool, {}, {}, cfg, b);
+    ASSERT_EQ(p1, p2);
+
+    // First pick is an EK zone (continent 0), last is Northrend (571).
+    auto continentOf = [&](uint32 z) -> uint32 {
+        for (PoolEntry const& e : pool)
+            if (e.zoneId == z) return e.continent;
+        return 0xFFFFFFFFu;
+    };
+    ASSERT_EQ(p1.size(), 3u);
+    EXPECT_EQ(continentOf(p1.front()), 0u);
+    EXPECT_EQ(continentOf(p1.back()), 571u);
+}
