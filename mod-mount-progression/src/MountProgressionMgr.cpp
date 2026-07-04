@@ -1063,10 +1063,15 @@ void MountProgressionMgr::MaybeSendStarterQuest(Player* player)
     if (quest)
     {
         player->AddQuest(quest, nullptr);
-        // Without this the client never receives the quest's text (it
-        // normally arrives via the questgiver dialog) and shows
-        // "Missing Header" in the quest log for this entry.
-        player->PlayerTalkClass->SendQuestGiverQuestDetails(quest, player->GetGUID(), true);
+        // Without this the client never receives the quest's text and
+        // shows "Missing Header" in the quest log for this entry. The
+        // quest LOG window (L) is populated by SMSG_QUEST_QUERY_RESPONSE
+        // (SendQuestQueryResponse) -- the same packet
+        // HandleQuestQueryOpcode sends in response to CMSG_QUEST_QUERY --
+        // NOT SMSG_QUESTGIVER_QUEST_DETAILS (SendQuestGiverQuestDetails),
+        // which is the live NPC accept/decline offer dialog and doesn't
+        // touch the log's cached quest data.
+        player->PlayerTalkClass->SendQuestQueryResponse(quest);
     }
 
     MailDraft draft(
