@@ -302,6 +302,186 @@ TerrorZones.Rewards.MaxBumpQuality = 4
 TerrorZones.Rewards.GoldLevelRatioExp = 2.0
 
 ###################################################################################################
+#    Slice 10 — effort-anchored gold floor
+#
+#    Loot coin is fixed by creature_template.mingold/maxgold, and beasts (wolves,
+#    boars) ship with both at 0 — so an empowered-zone wolf that takes minutes to
+#    kill drops no money at all. The floor overrides that with a level-anchored
+#    minimum scaled by the kill's "effort" (its scaled HP relative to a normal mob
+#    of that level), so reward tracks effort at any level / class. Computed at kill
+#    time (so 0-coin beasts get a visible pile) as:
+#        floor = PerLevelCopper * level^Exp * effort * goldRoll   (capped at CapCopper)
+#    and the kill keeps max(empowered-multiplied native gold, floor). When disabled,
+#    loot gold behaves exactly as Slice 3/4 (multiplier at loot-money time).
+###################################################################################################
+
+#    TerrorZones.Rewards.GoldFloor.Enable
+#        Description: Master on/off for the kill-time gold floor. 0 restores the
+#                     pure Slice 3/4 multiplier-at-loot-time behavior.
+#        Default:     1
+
+TerrorZones.Rewards.GoldFloor.Enable = 1
+
+#    TerrorZones.Rewards.GoldFloor.PerLevelCopper / .Exp
+#        Description: Level-anchored baseline copper: base = PerLevelCopper * level^Exp.
+#                     Default 0.5 * level^2 ≈ 26s at level 72 before effort / roll.
+#        Default:     0.5 / 2.0
+
+TerrorZones.Rewards.GoldFloor.PerLevelCopper = 0.5
+TerrorZones.Rewards.GoldFloor.Exp            = 2.0
+
+#    TerrorZones.Rewards.GoldFloor.EffortMin / .EffortMax
+#        Description: effort = clamp(mobMaxHp / (RefHpPerLevel * level), Min, Max).
+#                     A normal empowered mob (~7x native HP) reads as ~7 effort;
+#                     elites / tankier mobs read higher, up to Max. Min keeps even
+#                     a squishy kill paying the baseline.
+#        Default:     1.0 / 12.0
+
+TerrorZones.Rewards.GoldFloor.EffortMin = 1.0
+TerrorZones.Rewards.GoldFloor.EffortMax = 12.0
+
+#    TerrorZones.Rewards.GoldFloor.RefHpPerLevel
+#        Description: Expected HP of a normal mob per level, the denominator of the
+#                     effort ratio. Default 130 tracks the WotLK creature HP curve
+#                     (a normal level-72 mob is ~9.6k HP ≈ 130 * 72).
+#        Default:     130
+
+TerrorZones.Rewards.GoldFloor.RefHpPerLevel = 130
+
+#    TerrorZones.Rewards.GoldFloor.CapCopper
+#        Description: Hard per-kill ceiling on the floor, in copper. Safety net
+#                     against config typos / extreme effort. Default 500000 = 50g.
+#        Default:     500000
+
+TerrorZones.Rewards.GoldFloor.CapCopper = 500000
+
+###################################################################################################
+#    Slice 10 Pass 2 — per-TZ contract + mailed reward
+#
+#    On each eligible kill in an empowered zone, a player accrues "contract credit"
+#    (proportional to the mob's HP, i.e. how hard the kill was). When the rotation
+#    ends, a reward scaled by total credit is MAILED to the character: gold, plus an
+#    archetype gear piece once credit clears a threshold. Credit is per-character and
+#    persisted, so it works offline and across restarts, and rewards time invested
+#    rather than per-kill RNG. Group members in the same zone each accrue their own
+#    credit (grouping doesn't dilute the payout). Independent of the per-kill gold
+#    floor above — both can fire.
+###################################################################################################
+
+#    TerrorZones.Contract.Enable
+#        Description: Master on/off for the contract + mail system.
+#        Default:     1
+
+TerrorZones.Contract.Enable = 1
+
+#    TerrorZones.Contract.CreditPerKillDivisor
+#        Description: Credit per kill = mob max HP / this (min 1). Lower = more
+#                     credit per kill. Default 1000 → a ~67k-HP T3 wolf = ~67 credit.
+#        Default:     1000
+
+TerrorZones.Contract.CreditPerKillDivisor = 1000
+
+#    TerrorZones.Contract.CreditCapPerZone
+#        Description: Max credit a character can bank per zone per rotation
+#                     (diminishing returns — caps a no-life grind). 0 = uncapped.
+#        Default:     3000
+
+TerrorZones.Contract.CreditCapPerZone = 3000
+
+#    TerrorZones.Contract.GoldPerCreditCopper
+#        Description: Mailed gold = credit * this * TierGoldMult, clamped to
+#                     GoldCapCopper. Default 30c/credit.
+#        Default:     90
+
+TerrorZones.Contract.GoldPerCreditCopper = 90
+
+#    TerrorZones.Contract.GoldCapCopper
+#        Description: Hard ceiling on a single mailed gold reward, in copper.
+#                     Default 2000000 = 200g.
+#        Default:     2000000
+
+TerrorZones.Contract.GoldCapCopper = 2000000
+
+#    TerrorZones.Contract.GearCreditThreshold
+#        Description: Minimum banked credit for the mail to also include an
+#                     archetype gear piece (band = player level, tier = zone tier,
+#                     reusing the Slice 9 class-drop item pool). 0 disables mailed
+#                     gear entirely. A cell with no curated item silently mails gold
+#                     only. Default 1500 (~half a capped rotation of solid fights).
+#        Default:     1500
+
+TerrorZones.Contract.GearCreditThreshold = 1500
+
+#    TerrorZones.Contract.TierGoldMult.T1..T5
+#        Description: Per-tier multiplier on the mailed gold lump sum. Higher tiers
+#                     pay more for the same credit. Defaults 1.0 / 1.3 / 1.7 / 2.2 / 3.0.
+#        Default:     1.0 / 1.3 / 1.7 / 2.2 / 3.0
+
+TerrorZones.Contract.TierGoldMult.T1 = 1.0
+TerrorZones.Contract.TierGoldMult.T2 = 1.3
+TerrorZones.Contract.TierGoldMult.T3 = 1.7
+TerrorZones.Contract.TierGoldMult.T4 = 2.2
+TerrorZones.Contract.TierGoldMult.T5 = 3.0
+
+#    TerrorZones.Contract.AnnounceProgress
+#        Description: When 1, the player gets chat feedback as they bank contract
+#                     credit: a one-time line on first credit in a zone, a line when
+#                     credit crosses the gear threshold, and periodic "credit banked"
+#                     updates (see ProgressEveryCredit). Respects the per-player
+#                     master announce toggle (.zones announce off). The .zones command
+#                     always shows current banked credit regardless of this knob.
+#        Default:     1
+
+TerrorZones.Contract.AnnounceProgress = 1
+
+#    TerrorZones.Contract.ProgressEveryCredit
+#        Description: Emit a "credit banked" progress line each time banked credit
+#                     crosses a multiple of this value. 0 disables the periodic line
+#                     (the first-credit and gear-threshold lines still fire).
+#        Default:     100
+
+TerrorZones.Contract.ProgressEveryCredit = 100
+
+###################################################################################################
+#    Teleport unlock — "Terror Zone Beacon"
+#
+#    Earning enough lifetime credit (across ANY zone, whenever it happens to be empowered at a
+#    given tier) permanently unlocks that tier as a teleport destination. A single reusable item
+#    (like a Hearthstone) is granted the first time any tier unlocks; using it opens a menu listing
+#    every tier you've unlocked so far, and picking one sends you to whichever pool zone is
+#    CURRENTLY empowered at that tier — it fails with a chat message if nothing is at that tier
+#    right now, or if the current zone has no landing point configured. First-pass validation only
+#    wires up one zone's landing point (Duskwood); other zones show "no landing point" until
+#    they're populated the same way.
+###################################################################################################
+
+#    TerrorZones.Teleport.Enable
+#        Description: Master on/off for the teleport unlock system.
+#        Default:     1
+
+TerrorZones.Teleport.Enable = 1
+
+#    TerrorZones.Teleport.UnlockThreshold.T1..T5
+#        Description: Lifetime credit (same units as Contract.CreditPerKillDivisor) needed at
+#                     each tier to unlock that tier as a teleport destination. Higher tiers cost
+#                     more.
+#        Default:     800 / 1200 / 1800 / 2600 / 4000
+
+TerrorZones.Teleport.UnlockThreshold.T1 = 800
+TerrorZones.Teleport.UnlockThreshold.T2 = 1200
+TerrorZones.Teleport.UnlockThreshold.T3 = 1800
+TerrorZones.Teleport.UnlockThreshold.T4 = 2600
+TerrorZones.Teleport.UnlockThreshold.T5 = 4000
+
+#    TerrorZones.Teleport.ItemEntry
+#        Description: custom_item_template entry (mod-custom-items) of the "Terror Zone
+#                     Beacon" granted on first unlock. 0 = not configured yet (unlocks are
+#                     recorded but nothing is granted).
+#        Default:     705000
+
+TerrorZones.Teleport.ItemEntry = 705000
+
+###################################################################################################
 #    Slice 4 — empowerment flavors, atmosphere overrides, gathering + unique drops
 #
 #    Every empowered rotation is tagged with one of five flavors: Bloodbath (XP-heavy),
@@ -371,7 +551,7 @@ TerrorZones.Flavor.Overlay.Merchants.TierBumpAdd  = 0.00
 
 TerrorZones.Flavor.WeatherOverride.Enable = 1
 
-TerrorZones.Flavor.Weather.Bloodbath.State   = 90
+TerrorZones.Flavor.Weather.Bloodbath.State   = 5
 TerrorZones.Flavor.Weather.Bloodbath.Grade   = 0.75
 TerrorZones.Flavor.Weather.Prospectors.State = 1
 TerrorZones.Flavor.Weather.Prospectors.Grade = 0.40
@@ -769,6 +949,43 @@ TerrorZones.Combat.EliteDensity.T5 = 400
 
 TerrorZones.Combat.Elite.HpMult     = 1.5
 TerrorZones.Combat.Elite.DamageMult = 1.3
+
+#
+#    Slice 10 Pass 3 — group HP scaling (engage-time, "Model C").
+#
+#    Solo difficulty is unchanged. When a GROUPED player lands the first
+#    hit on an empowered-zone mob, the mob's max HP is multiplied so the
+#    fight stays as challenging per-capita as it is solo:
+#        factor = 1 + (sum of other in-zone members' max HP / tapper's max
+#                 HP) * Dampen,   clamped to [1, MaxFactor]
+#    For an N-player group of similar gear that's ~1 + (N-1)*Dampen, so a
+#    5-player group at Dampen 0.75 faces ~4x HP. Per-hit damage is NOT
+#    group-scaled (only HP), so healers/tanks let a group survive — the
+#    fight is about throughput. Scales once per mob per engagement;
+#    killing it lets a respawn re-scale. Event bosses are excluded.
+#
+
+#    TerrorZones.Combat.GroupScaling.Enable
+#        Description: Master on/off. 0 = mobs keep solo HP regardless of
+#                     group size (groups clear faster, as before this slice).
+#        Default:     1
+
+TerrorZones.Combat.GroupScaling.Enable = 1
+
+#    TerrorZones.Combat.GroupScaling.Dampen
+#        Description: Weight per unit of other-member EHP. 1.0 = full linear
+#                     (a 5-group → 5x HP); 0.75 (default) gives diminishing
+#                     returns (5-group → ~4x); 0 disables scaling.
+#        Default:     0.75
+
+TerrorZones.Combat.GroupScaling.Dampen = 0.75
+
+#    TerrorZones.Combat.GroupScaling.MaxFactor
+#        Description: Hard ceiling on the HP factor, so a huge raid can't
+#                     mint absurd HP pools. Clamped to >= 1.0.
+#        Default:     8.0
+
+TerrorZones.Combat.GroupScaling.MaxFactor = 8.0
 
 #
 #    Event-boss bonus loot (Slice 6 Pass 2). Reads

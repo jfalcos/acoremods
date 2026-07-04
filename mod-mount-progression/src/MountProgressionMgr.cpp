@@ -4,7 +4,10 @@
 #include "Creature.h"
 #include "DatabaseEnv.h"
 #include "Log.h"
+#include "Mail.h"
+#include "ObjectMgr.h"
 #include "Player.h"
+#include "QuestDef.h"
 #include "SharedDefines.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
@@ -161,6 +164,23 @@ void MountProgressionMgr::LoadConfig()
     _iconDonor[static_cast<size_t>(MountType::Arcane)] =
         sConfigMgr->GetOption<uint32>("MountProgression.IconDonor.Arcane", 22418);
 
+    _announceXPGain = sConfigMgr->GetOption<bool>(
+        "MountProgression.AnnounceXPGain", true);
+    _announceXPGainIntervalSeconds = sConfigMgr->GetOption<uint32>(
+        "MountProgression.AnnounceXPGainIntervalSeconds", 20);
+
+    _starterQuestEnabled = sConfigMgr->GetOption<bool>(
+        "MountProgression.StarterQuest.Enable", true);
+    _starterQuestId = sConfigMgr->GetOption<uint32>(
+        "MountProgression.StarterQuest.QuestId", 900000);
+
+    _starterSpell[0] = sConfigMgr->GetOption<uint32>(
+        "MountProgression.StarterSpell.Stamina", 458);
+    _starterSpell[1] = sConfigMgr->GetOption<uint32>(
+        "MountProgression.StarterSpell.Predator", 459);
+    _starterSpell[2] = sConfigMgr->GetOption<uint32>(
+        "MountProgression.StarterSpell.Arcane", 8980);
+
     LOG_INFO("module",
              "mod-mount-progression: enabled={}, maxLevel={}, xpBase=[{},{},{},{},{}], "
              "killXp=[{}/{}/{}], dist(y/xp={} cap={}), cast={}, gather={}, craft={}, area={}, "
@@ -182,6 +202,13 @@ void MountProgressionMgr::LoadConfig()
              _carrierSpell[3], _carrierSpell[4],
              _iconDonor[0], _iconDonor[1], _iconDonor[2],
              _iconDonor[3], _iconDonor[4]);
+    LOG_INFO("module",
+             "mod-mount-progression: announceXpGain={} interval={}s "
+             "starterSpells=[stamina={},predator={},arcane={}] "
+             "starterQuest(enable={},id={})",
+             _announceXPGain, _announceXPGainIntervalSeconds,
+             _starterSpell[0], _starterSpell[1], _starterSpell[2],
+             _starterQuestEnabled, _starterQuestId);
 }
 
 uint32 MountProgressionMgr::GetIconDonor(uint32 realCarrierSpellId) const
@@ -196,9 +223,14 @@ void MountProgressionMgr::LoadCatalog()
 {
     _catalog.clear();
 
+    // excluded=1 rows (Blizzard internal test/dev spells, unfinished
+    // placeholder entries, temporary quest-loaner mounts -- see Slice 6
+    // audit migration) are never loaded, so no feature can select them
+    // even by spell_id (GetCatalogEntry/`.mount give` simply won't find
+    // them, same as any other unknown spell).
     QueryResult result = WorldDatabase.Query(
         "SELECT spell_id, display_id, display_name, rarity, type "
-        "FROM mount_progression_catalog");
+        "FROM mount_progression_catalog WHERE excluded = 0");
 
     if (!result)
     {
@@ -325,6 +357,7 @@ void MountProgressionMgr::UnloadPlayerState(ObjectGuid guid)
     _progress.erase(guidLow);
     _active.erase(guidLow);
     _tickState.erase(guidLow);
+    _xpAnnounce.erase(guidLow);
 }
 
 MountProgress* MountProgressionMgr::GetOrCreateProgress(Player* player, uint32 spellId)
@@ -636,6 +669,38 @@ void MountProgressionMgr::AnnounceActiveMount(Player* player,
             TypeName(entry->type), level, xp, need, XPSourceName(entry->type));
 }
 
+void MountProgressionMgr::AnnounceXPGain(Player* player, CatalogEntry const* entry,
+                                         uint32 amount)
+{
+    if (!_announceXPGain || !player || !entry || !player->GetSession() || amount == 0)
+        return;
+
+    uint32 guidLow = player->GetGUID().GetCounter();
+    uint64 now = static_cast<uint64>(::time(nullptr));
+    uint32 flushAmount = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(_stateMutex);
+        XpAnnounceState& state = _xpAnnounce[guidLow];
+        state.accumXp += amount;
+
+        if (state.lastFlushTime != 0 &&
+            now - state.lastFlushTime < _announceXPGainIntervalSeconds)
+            return;  // still within throttle window; keep accumulating
+
+        flushAmount = state.accumXp;
+        state.accumXp = 0;
+        state.lastFlushTime = now;
+    }
+
+    if (flushAmount == 0)
+        return;
+
+    ChatHandler(player->GetSession()).PSendSysMessage(
+        "|cff7f7fffYour {} grows stronger. (+{} XP)|r",
+        entry->displayName, flushAmount);
+}
+
 void MountProgressionMgr::AwardXP(Player* player, MountProgress* mp, uint32 amount,
                                   CatalogEntry const* entry)
 {
@@ -670,6 +735,10 @@ void MountProgressionMgr::AwardXP(Player* player, MountProgress* mp, uint32 amou
         ChatHandler(player->GetSession()).PSendSysMessage(
             "|cff40ff40Your {} reached mount level {}!|r",
             entry->displayName, leveledUpTo);
+    }
+    else if (!leveledUpTo)
+    {
+        AnnounceXPGain(player, entry, amount);
     }
 
     if (leveledUpTo && GetActiveMount(player) == entry->spellId)
@@ -900,6 +969,150 @@ void MountProgressionMgr::LoadActiveMountFromDB(Player* player)
     MountProgress const* mp = GetProgress(player, spellId);
     uint16 level = mp ? mp->level : 1;
     ApplyMountBuff(player, entry, level);
+}
+
+bool MountProgressionMgr::HasMadeStarterChoice(Player* player) const
+{
+    if (!player)
+        return false;
+    uint32 guidLow = player->GetGUID().GetCounter();
+    QueryResult result = CharacterDatabase.Query(
+        "SELECT 1 FROM character_mount_starter_choice WHERE guid = {}", guidLow);
+    return result != nullptr;
+}
+
+uint32 MountProgressionMgr::GetStarterSpell(MountType t) const
+{
+    switch (t)
+    {
+        case MountType::Stamina:  return _starterSpell[0];
+        case MountType::Predator: return _starterSpell[1];
+        case MountType::Arcane:   return _starterSpell[2];
+        default:                  return 0;
+    }
+}
+
+CatalogEntry const* MountProgressionMgr::GrantStarterMount(Player* player, uint32 spellId)
+{
+    if (!_enabled || !player)
+        return nullptr;
+    if (HasMadeStarterChoice(player))
+        return nullptr;
+
+    CatalogEntry const* entry = GetCatalogEntry(spellId);
+    if (!entry)
+        return nullptr;
+
+    if (!player->HasSpell(spellId))
+        player->learnSpell(spellId);
+
+    ActivateMount(player, spellId);
+
+    uint32 guidLow = player->GetGUID().GetCounter();
+    uint64 now = static_cast<uint64>(::time(nullptr));
+    CharacterDatabase.Execute(
+        "INSERT INTO character_mount_starter_choice (guid, spell_id, chosen_at) "
+        "VALUES ({}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE "
+        "spell_id = VALUES(spell_id), "
+        "chosen_at = VALUES(chosen_at)",
+        guidLow, spellId, now);
+
+    if (_debug)
+        LOG_INFO("module",
+                 "mod-mount-progression: guid {} made starter mount choice -> {} ({})",
+                 guidLow, spellId, entry->displayName);
+
+    return entry;
+}
+
+bool MountProgressionMgr::ResetStarterChoice(Player* player)
+{
+    if (!player)
+        return false;
+
+    uint32 guidLow = player->GetGUID().GetCounter();
+    bool hadChoice = HasMadeStarterChoice(player);
+
+    CharacterDatabase.Execute(
+        "DELETE FROM character_mount_starter_choice WHERE guid = {}", guidLow);
+
+    if (_debug)
+        LOG_INFO("module",
+                 "mod-mount-progression: guid {} starter choice reset (had_choice={})",
+                 guidLow, hadChoice);
+
+    return hadChoice;
+}
+
+void MountProgressionMgr::MaybeSendStarterQuest(Player* player)
+{
+    if (!_enabled || !_starterQuestEnabled || !player)
+        return;
+    if (HasMadeStarterChoice(player))
+        return;
+
+    uint32 guidLow = player->GetGUID().GetCounter();
+
+    QueryResult already = CharacterDatabase.Query(
+        "SELECT 1 FROM character_mount_starter_quest_sent WHERE guid = {}", guidLow);
+    if (already)
+        return;
+
+    Quest const* quest = sObjectMgr->GetQuestTemplate(_starterQuestId);
+    if (quest)
+    {
+        player->AddQuest(quest, nullptr);
+        // Without this the client never receives the quest's text (it
+        // normally arrives via the questgiver dialog) and shows
+        // "Missing Header" in the quest log for this entry.
+        player->PlayerTalkClass->SendQuestGiverQuestDetails(quest, player->GetGUID(), true);
+    }
+
+    MailDraft draft(
+        "Your First Companion",
+        "A folded letter arrives, sealed with a hoofprint pressed into wax.\n\n"
+        "\"Every rider needs a first companion -- one that will grow "
+        "alongside you. I've something for you; come find me, and we'll "
+        "see which one suits you best.\"\n\n"
+        "-- The Mount Tamer\n\n"
+        "(A new task has been added to your quest log.)");
+
+    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+    draft.SendMailTo(trans, MailReceiver(player, guidLow), MailSender(MAIL_NORMAL, 0));
+    trans->Append(
+        "INSERT INTO character_mount_starter_quest_sent (guid, sent_at) "
+        "VALUES ({}, {}) "
+        "ON DUPLICATE KEY UPDATE sent_at = VALUES(sent_at)",
+        guidLow, static_cast<uint64>(::time(nullptr)));
+    CharacterDatabase.CommitTransaction(trans);
+
+    if (_debug)
+        LOG_INFO("module",
+                 "mod-mount-progression: guid {} sent starter mail+quest (quest={})",
+                 guidLow, _starterQuestId);
+}
+
+void MountProgressionMgr::CompleteStarterQuest(Player* player)
+{
+    if (!_enabled || !_starterQuestEnabled || !player)
+        return;
+
+    uint16 slot = player->FindQuestSlot(_starterQuestId);
+    if (slot >= MAX_QUEST_LOG_SIZE)
+        return;
+
+    Quest const* quest = sObjectMgr->GetQuestTemplate(_starterQuestId);
+    if (!quest)
+        return;
+
+    player->CompleteQuest(_starterQuestId);
+    player->RewardQuest(quest, 0, player);
+
+    if (_debug)
+        LOG_INFO("module",
+                 "mod-mount-progression: guid {} completed starter quest {}",
+                 player->GetGUID().GetCounter(), _starterQuestId);
 }
 
 }  // namespace mod_mount_progression

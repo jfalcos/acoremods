@@ -153,6 +153,28 @@ MountProgression.OfflineGraceSeconds = 1800
 MountProgression.AnnounceActiveOnCast = 1
 
 #
+#    Throttled "mount is growing" XP-trickle message. Fires on XP gain
+#    that does NOT trigger a level-up (level-ups always announce
+#    immediately via the existing green message). Distinct from
+#    AnnounceActiveOnCast (the "[Mount] Active: ..." status line on
+#    mount-cast) — this is ambient progress flavor, separately
+#    toggleable and rate-limited so high-frequency XP sources (stamina
+#    ~1 tick/sec while riding, arcane ~1 XP/cast) don't spam chat.
+#    Default: 1 (enabled)
+#
+
+MountProgression.AnnounceXPGain = 1
+
+#
+#    Minimum seconds between XP-trickle flushes per character.
+#    Accumulated XP since the last flush is summed into a single
+#    message.
+#    Default: 20
+#
+
+MountProgression.AnnounceXPGainIntervalSeconds = 20
+
+#
 #    Reserved spell IDs for the five carrier auras. Override only if
 #    80000..80004 collide with your DBC overlay. Changing these also
 #    requires re-writing the Slice 3 carrier-spell SQL migration.
@@ -197,6 +219,67 @@ MountProgression.IconDonor.Predator   = 30848
 MountProgression.IconDonor.Agility    = 8115
 MountProgression.IconDonor.Mechanical = 77
 MountProgression.IconDonor.Arcane     = 22418
+
+#
+#    ===============================================================
+#    Starter mount choice
+#    ===============================================================
+#    A dedicated NPC ("Mount Tamer", ScriptName npc_mount_tamer) offers
+#    new characters a one-time choice between 3 Common-rarity starter
+#    mounts: Stamina (universal — every class values survivability),
+#    Predator (physical dps — Attack Power), and Arcane (caster/healing
+#    dps — spell power + healing, the only type whose buff benefits
+#    casters/healers at all). Agility was deliberately left out — its
+#    audience (rogue/hunter/feral) already overlaps with Predator's, so
+#    the trio covers class archetypes better without it. Mechanical is
+#    still excluded (chopper/rocket mounts, no level-1 equivalent). The
+#    Arcane slot intentionally does NOT use the catalog's usual
+#    high-level drakes/gryphons/brooms — those are all reduced-speed or
+#    flying mounts (a Hallow's End "Rickety Magic Broom" was tried first
+#    but has a noticeably slower speed bonus than the other two
+#    starters). It instead uses Skeletal Horse, an ordinary common
+#    ground mount hand-reclassified to type=arcane so it has the same
+#    standard speed as Brown Horse/Gray Wolf while still granting the
+#    caster/healing buff. The choice is permanent and gated by the
+#    character_mount_starter_choice table.
+#
+#    MountProgression.StarterSpell.Stamina/.Predator/.Arcane
+#        Description: Spell IDs offered as the 3 starter mount choices.
+#                     Must exist in mount_progression_catalog. Defaults
+#                     are racially-neutral common mounts (Brown Horse,
+#                     Gray Wolf, Skeletal Horse); override per-realm to
+#                     theme by dominant population if desired.
+#        Default:     458 / 459 / 8980
+#
+
+MountProgression.StarterSpell.Stamina  = 458
+MountProgression.StarterSpell.Predator = 459
+MountProgression.StarterSpell.Arcane   = 8980
+
+#
+#    Slice 5 — starter quest/mail nudge. On login, a character who
+#    hasn't made their starter choice yet (and hasn't already been
+#    mailed) receives an in-game letter from the Mount Tamer plus a
+#    matching quest ("Choose Your Companion") added directly to their
+#    log — no need to already know an NPC exists. The quest is
+#    completed + rewarded automatically the moment they actually pick a
+#    mount at the Mount Tamer; it has no kill/collect objectives of its
+#    own. Sent at most once per character (gated by
+#    character_mount_starter_quest_sent).
+#
+
+#    MountProgression.StarterQuest.Enable
+#        Description: Master toggle for the mail+quest nudge.
+#        Default:     1
+
+MountProgression.StarterQuest.Enable = 1
+
+#    MountProgression.StarterQuest.QuestId
+#        Description: quest_template ID to grant/complete. Must exist
+#                     in quest_template (see the Slice 5 SQL migration).
+#        Default:     900000
+
+MountProgression.StarterQuest.QuestId = 900000
 
 #
 #    Debug — extra logging to the `module` logger channel.

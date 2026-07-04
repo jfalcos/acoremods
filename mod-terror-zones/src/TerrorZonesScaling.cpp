@@ -12,6 +12,8 @@
 #include "Creature.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
+#include "Group.h"
+#include "GroupReference.h"
 #include "Log.h"
 #include "Map.h"
 #include "MapMgr.h"
@@ -471,6 +473,112 @@ void TerrorZonesMgr::WalkZoneRescale(uint32 zoneId, bool edgeOn,
     LOG_INFO("module",
              "mod-terror-zones: tick rescale zone={} edge={} creatures_walked={} scaled={}",
              zoneId, edgeOn ? "on" : "off", walked, scaled);
+}
+
+// Slice 10 Pass 3 — engage-time group HP scaling (Model C). Fires from
+// the UnitScript OnDamage hook for every damage event; fast-rejects all
+// but the first player hit on a fresh, eligible, empowered-zone mob. When
+// the engaging player is grouped, the mob's max HP is multiplied by the
+// group's combined-EHP factor so the fight stays per-capita challenging.
+// Per-hit damage is left to the Slice 8 path (unchanged).
+void TerrorZonesMgr::ApplyGroupHpScaling(Unit* attacker, Unit* victim)
+{
+    if (!_enabled || !_combatEnabled || !_groupScalingEnabled)
+        return;
+    if (!attacker || !victim)
+        return;
+
+    Player* player = attacker->ToPlayer();
+    if (!player)
+        return;  // only direct player damage triggers the engage scale
+    Creature* c = victim->ToCreature();
+    if (!c)
+        return;
+
+    uint64 rawGuid = c->GetGUID().GetRawValue();
+    if (_groupScaledGuids.count(rawGuid))
+        return;  // already evaluated this engagement (cheap hot-path exit)
+
+    // Only at combat start (full HP) — avoids healing a mid-fight mob if
+    // this is somehow not the first hit.
+    if (c->GetHealth() != c->GetMaxHealth())
+    {
+        _groupScaledGuids.insert(rawGuid);  // missed the window; don't retry
+        return;
+    }
+
+    uint32 zoneId = c->GetZoneId();
+    ActiveSlot slot;
+    if (!TryGetSlotForZone(zoneId, slot))
+        return;  // not empowered
+    if (_eventBossSpawnIndex.count(rawGuid))
+        return;  // event bosses own their scaling
+    if (!IsScalingEligible(c))
+        return;
+
+    // Mark evaluated regardless of group so solo-tapped mobs aren't
+    // re-checked on every subsequent hit this engagement.
+    _groupScaledGuids.insert(rawGuid);
+
+    Group* grp = player->GetGroup();
+    if (!grp)
+        return;  // solo — current solo difficulty stands
+
+    uint32 tapperEhp = player->GetMaxHealth();
+    uint64 sumOther = 0;
+    uint32 members = 1;
+    for (GroupReference* itr = grp->GetFirstMember(); itr; itr = itr->next())
+    {
+        Player* m = itr->GetSource();
+        if (!m || m == player || !m->IsInWorld() || !m->IsAlive())
+            continue;
+        if (WorldSession* s = m->GetSession(); s && s->IsBot())
+            continue;
+        if (m->GetZoneId() != zoneId)
+            continue;
+        sumOther += m->GetMaxHealth();
+        ++members;
+    }
+    if (sumOther == 0)
+        return;  // no other members present — effectively solo
+
+    float factor = GroupHpFactor(sumOther, tapperEhp,
+                                 _groupScalingDampen, _groupScalingMaxFactor);
+    if (factor <= 1.0f)
+        return;
+
+    uint32 baseHp = c->GetMaxHealth();
+    if (baseHp == 0)
+        return;
+    uint64 scaled = static_cast<uint64>(baseHp)
+                  * static_cast<uint64>(factor * 1000.0f) / 1000ULL;
+    if (scaled > std::numeric_limits<uint32>::max())
+        scaled = std::numeric_limits<uint32>::max();
+    uint32 newHp = static_cast<uint32>(scaled);
+    if (newHp <= baseHp)
+        return;
+
+    // Same BASE_VALUE + SetMaxHealth/SetHealth dance the Slice 8 HP path
+    // uses, so a later UpdateMaxHealth recompute keeps our scaled value.
+    c->SetStatFlatModifier(UNIT_MOD_HEALTH, BASE_VALUE,
+                           static_cast<float>(newHp));
+    c->SetCreateHealth(newHp);
+    c->SetMaxHealth(newHp);
+    c->SetHealth(newHp);
+
+    if (_debug)
+        LOG_INFO("module",
+                 "mod-terror-zones: group HP scale entry={} guid={} zone={} "
+                 "members={} tapper_ehp={} sum_other_ehp={} factor=x{:.2f} "
+                 "from={} to={}",
+                 c->GetEntry(), c->GetGUID().GetCounter(), zoneId,
+                 members, tapperEhp, sumOther, factor, baseHp, newHp);
+}
+
+void TerrorZonesMgr::OnCreatureKilled(Creature* killed)
+{
+    if (killed)
+        _groupScaledGuids.erase(killed->GetGUID().GetRawValue());
 }
 
 } // namespace mod_terror_zones

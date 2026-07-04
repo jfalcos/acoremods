@@ -8,6 +8,7 @@
 
 void AddMountProgressionPlayerScripts();
 void AddMountProgressionCommandScripts();
+void AddMountProgressionStarterNpcScript();
 
 namespace
 {
@@ -74,4 +75,5 @@ void Addmod_mount_progressionScripts()
     new Mount_UnitScript();
     AddMountProgressionPlayerScripts();
     AddMountProgressionCommandScripts();
+    AddMountProgressionStarterNpcScript();
 }

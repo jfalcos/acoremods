@@ -126,6 +126,18 @@ namespace
                                      TierDisplayName(s.tier),
                                      FlavorDisplayName(s.flavor),
                                      s.zoneId);
+            // Slice 10 Pass 2 — the caller's banked contract credit for
+            // this zone (the bounty mailed when the rotation ends).
+            if (mgr.IsContractEnabled())
+            {
+                if (Player* self = handler->GetPlayer())
+                {
+                    uint32 cr = mgr.GetContractCreditFor(
+                        self->GetGUID().GetCounter(), s.zoneId);
+                    handler->PSendSysMessage(
+                        "    Your bounty  {} credit banked", cr);
+                }
+            }
             if (mgr.IsTierEnabled() && s.tier != TIER_NONE
                 && s.flavor != FLAVOR_NONE)
             {

@@ -23,9 +23,7 @@ namespace
 
         void OnPlayerBeforeLootMoney(Player* player, Loot* loot) override
         {
-            if (!loot)
-                return;
-            TerrorZonesMgr::Instance().ApplyGoldMultiplier(loot->gold, player);
+            TerrorZonesMgr::Instance().ApplyGoldMultiplier(loot, player);
         }
 
         // Event-boss gold uplift fires here. OnPlayerCreatureKill
@@ -41,8 +39,17 @@ namespace
         {
             if (!killer || !killed)
                 return;
-            TerrorZonesMgr::Instance().ApplyEventBossGoldUplift(
-                killed->loot, killer);
+            auto& mgr = TerrorZonesMgr::Instance();
+            // Slice 10 — kill-time loot-gold floor. Runs before the
+            // event-boss uplift so a boss kill takes the larger of the
+            // two (the uplift's max() is idempotent over the floor).
+            mgr.ApplyKillGoldFloor(killed, killer);
+            mgr.ApplyEventBossGoldUplift(killed->loot, killer);
+            // Slice 10 Pass 2 — accrue per-TZ contract credit (write-through).
+            mgr.AccrueContractCredit(killed, killer);
+            // Slice 10 Pass 3 — release group-scale tracking so a respawn
+            // of this creature re-scales for groups within the rotation.
+            mgr.OnCreatureKilled(killed);
         }
 
         void OnPlayerQuestComputeMoney(Player* player, Quest const* /*quest*/,

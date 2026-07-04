@@ -220,3 +220,40 @@ TEST(TerrorZonesCombatMult, IsPromotedSpawnRerollsAcrossRotations)
     }
     EXPECT_GT(disagree, 250u);
 }
+
+// -----------------------------------------------------------------------------
+// Slice 10 Pass 3 — group HP scaling factor
+// -----------------------------------------------------------------------------
+
+TEST(TerrorZonesGroupScaling, SoloAndDegenerateReturnsOne)
+{
+    // No other members → no scaling.
+    EXPECT_FLOAT_EQ(GroupHpFactor(0, 7600, 0.75f, 8.0f), 1.0f);
+    // Zero tapper EHP or zero dampen → no scaling.
+    EXPECT_FLOAT_EQ(GroupHpFactor(30000, 0, 0.75f, 8.0f), 1.0f);
+    EXPECT_FLOAT_EQ(GroupHpFactor(30000, 7600, 0.0f, 8.0f), 1.0f);
+}
+
+TEST(TerrorZonesGroupScaling, EqualGearGroupApproximatesCountCurve)
+{
+    // 5-player group of equal 7600 EHP: sumOther = 4 * 7600 = 30400.
+    // factor = 1 + 4 * 0.75 = 4.0.
+    EXPECT_FLOAT_EQ(GroupHpFactor(30400, 7600, 0.75f, 8.0f), 4.0f);
+    // 2-player: sumOther = 7600 → 1 + 1*0.75 = 1.75.
+    EXPECT_FLOAT_EQ(GroupHpFactor(7600, 7600, 0.75f, 8.0f), 1.75f);
+    // Full linear dampen=1.0, 3-player: 1 + 2*1.0 = 3.0.
+    EXPECT_FLOAT_EQ(GroupHpFactor(15200, 7600, 1.0f, 8.0f), 3.0f);
+}
+
+TEST(TerrorZonesGroupScaling, WeightsByActualEhp)
+{
+    // A high-EHP tapper (tank, 30000) with squishy mates (3 * 7000 = 21000)
+    // scales less than equal gear would: 1 + (21000/30000)*0.75 = 1.525.
+    EXPECT_NEAR(GroupHpFactor(21000, 30000, 0.75f, 8.0f), 1.525f, 0.0005f);
+}
+
+TEST(TerrorZonesGroupScaling, ClampsToMaxFactor)
+{
+    // A huge raid would exceed the ceiling.
+    EXPECT_FLOAT_EQ(GroupHpFactor(400000, 7600, 0.75f, 8.0f), 8.0f);
+}

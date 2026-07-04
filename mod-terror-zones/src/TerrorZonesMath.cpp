@@ -253,6 +253,125 @@ uint32 ComputeMultipliedValue(uint32 baseline, float mult)
 }
 
 // -----------------------------------------------------------------------------
+// Slice 10 — effort-anchored gold floor (pure)
+// -----------------------------------------------------------------------------
+
+uint32 GoldFloorBaseCopper(uint8 level, float perLevelCopper, float exp)
+{
+    if (level == 0 || perLevelCopper <= 0.0f)
+        return 0;
+    double base = static_cast<double>(perLevelCopper)
+                * std::pow(static_cast<double>(level),
+                           static_cast<double>(exp));
+    if (base <= 0.0)
+        return 0;
+    if (base >= static_cast<double>(std::numeric_limits<uint32>::max()))
+        return std::numeric_limits<uint32>::max();
+    return static_cast<uint32>(base);
+}
+
+float KillEffortFactor(uint32 mobMaxHp, uint32 refHp, float minF, float maxF)
+{
+    if (maxF < minF)
+        maxF = minF;
+    if (mobMaxHp == 0 || refHp == 0)
+        return minF;
+    float ratio = static_cast<float>(mobMaxHp) / static_cast<float>(refHp);
+    if (ratio < minF)
+        return minF;
+    if (ratio > maxF)
+        return maxF;
+    return ratio;
+}
+
+uint32 ComputeGoldFloorCopper(uint32 baseCopper, float effort,
+                              float tierGoldRoll, uint32 capCopper)
+{
+    if (baseCopper == 0 || effort <= 0.0f || tierGoldRoll <= 0.0f)
+        return 0;
+    double v = static_cast<double>(baseCopper)
+             * static_cast<double>(effort)
+             * static_cast<double>(tierGoldRoll);
+    if (v <= 0.0)
+        return 0;
+    uint64 vi = (v >= static_cast<double>(std::numeric_limits<uint32>::max()))
+              ? std::numeric_limits<uint32>::max()
+              : static_cast<uint64>(v);
+    if (capCopper != 0 && vi > capCopper)
+        vi = capCopper;
+    return static_cast<uint32>(vi);
+}
+
+// -----------------------------------------------------------------------------
+// Slice 10 Pass 2 — contract credit + mailed-reward math (pure)
+// -----------------------------------------------------------------------------
+
+uint32 KillCredit(uint32 mobMaxHp, uint32 divisor)
+{
+    if (mobMaxHp == 0)
+        return 0;
+    if (divisor == 0)
+        divisor = 1;
+    uint32 c = mobMaxHp / divisor;
+    // Any real eligible kill is worth at least one credit point, so even
+    // low-HP empowered mobs accrue toward the contract.
+    return c == 0 ? 1 : c;
+}
+
+uint32 ContractGoldCopper(uint32 credit, uint32 goldPerCredit,
+                          float tierMult, uint32 capCopper)
+{
+    if (credit == 0 || goldPerCredit == 0 || tierMult <= 0.0f)
+        return 0;
+    double g = static_cast<double>(credit)
+             * static_cast<double>(goldPerCredit)
+             * static_cast<double>(tierMult);
+    if (g <= 0.0)
+        return 0;
+    uint64 gi = (g >= static_cast<double>(std::numeric_limits<uint32>::max()))
+              ? std::numeric_limits<uint32>::max()
+              : static_cast<uint64>(g);
+    if (capCopper != 0 && gi > capCopper)
+        gi = capCopper;
+    return static_cast<uint32>(gi);
+}
+
+uint8 ContractBandIndexForLevel(uint8 level)
+{
+    // Mirrors the Slice 9 class-drop bucketing: bands 10-19, 20-29, …,
+    // 70-79, 80 (8 brackets). < 10 → band 0; >= 80 → band 7.
+    if (level >= 80)
+        return 7;
+    if (level < 10)
+        return 0;
+    return static_cast<uint8>((level - 10) / 10);
+}
+
+// -----------------------------------------------------------------------------
+// Slice 10 Pass 3 — group HP scaling (Model C, pure)
+// -----------------------------------------------------------------------------
+
+float GroupHpFactor(uint64 sumOtherEhp, uint32 tapperEhp,
+                    float dampen, float cap)
+{
+    // Solo (no other members) or degenerate input → no scaling.
+    if (tapperEhp == 0 || sumOtherEhp == 0 || dampen <= 0.0f)
+        return 1.0f;
+    // factor = 1 + (combined-other-EHP / tapper-EHP) * dampen.
+    // For an N-player group of equal EHP this is 1 + (N-1)*dampen, so a
+    // 5-player group at dampen 0.75 lands at 4.0x HP — the same per-capita
+    // fight a solo player gets, with diminishing returns for stacking.
+    double f = 1.0 + (static_cast<double>(sumOtherEhp)
+                      / static_cast<double>(tapperEhp))
+                     * static_cast<double>(dampen);
+    if (f < 1.0)
+        f = 1.0;
+    if (cap > 1.0f && f > static_cast<double>(cap))
+        f = static_cast<double>(cap);
+    return static_cast<float>(f);
+}
+
+// -----------------------------------------------------------------------------
 // Slice 4 — pure flavor helpers
 // -----------------------------------------------------------------------------
 

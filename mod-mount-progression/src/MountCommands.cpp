@@ -193,6 +193,22 @@ namespace
         return true;
     }
 
+    bool HandleMountResetStarterCmd(ChatHandler* handler, char const* /*args*/)
+    {
+        Player* player = handler->GetPlayer();
+        if (!player)
+            return false;
+
+        bool hadChoice = MountProgressionMgr::Instance().ResetStarterChoice(player);
+        if (hadChoice)
+            handler->SendSysMessage(
+                "Starter mount choice cleared -- talk to the Mount Tamer again to pick.");
+        else
+            handler->SendSysMessage(
+                "No starter mount choice was on record for you (nothing to reset).");
+        return true;
+    }
+
     class Mount_CommandScript : public CommandScript
     {
     public:
@@ -202,10 +218,11 @@ namespace
         {
             static ChatCommandTable mountSub =
             {
-                { "",         HandleMountInfoCmd,     SEC_PLAYER,     Console::No },
-                { "give",     HandleMountGiveCmd,     SEC_GAMEMASTER, Console::No },
-                { "addxp",    HandleMountAddXpCmd,    SEC_GAMEMASTER, Console::No },
-                { "setlevel", HandleMountSetLevelCmd, SEC_GAMEMASTER, Console::No },
+                { "",             HandleMountInfoCmd,         SEC_PLAYER,     Console::No },
+                { "give",         HandleMountGiveCmd,         SEC_GAMEMASTER, Console::No },
+                { "addxp",        HandleMountAddXpCmd,        SEC_GAMEMASTER, Console::No },
+                { "setlevel",     HandleMountSetLevelCmd,     SEC_GAMEMASTER, Console::No },
+                { "resetstarter", HandleMountResetStarterCmd, SEC_GAMEMASTER, Console::No },
             };
             static ChatCommandTable root =
             {

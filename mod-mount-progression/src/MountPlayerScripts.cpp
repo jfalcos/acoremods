@@ -22,6 +22,7 @@ namespace
             auto& mgr = MountProgressionMgr::Instance();
             mgr.LoadPlayerState(player);
             mgr.LoadActiveMountFromDB(player);
+            mgr.MaybeSendStarterQuest(player);
         }
 
         void OnPlayerLogout(Player* player) override

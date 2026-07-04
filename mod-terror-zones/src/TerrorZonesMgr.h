@@ -3,6 +3,7 @@
 
 #include "Define.h"
 #include "ObjectGuid.h"
+#include <array>
 #include <atomic>
 #include <memory>
 #include <random>
@@ -224,6 +225,15 @@ struct PoolEntry
     // one zone per continent. 0 is also the EK continent, so a
     // failed lookup (logged) folds harmlessly into the EK group.
     uint32 continent = 0;
+
+    // Teleport-spell landing point (§Teleport). tpMap < 0 means "not yet
+    // configured" for this zone — TeleportPlayerToTier refuses to
+    // teleport there and sends a chat error instead.
+    int32 tpMap = -1;
+    float tpX = 0.0f;
+    float tpY = 0.0f;
+    float tpZ = 0.0f;
+    float tpO = 0.0f;
 };
 
 struct SelectionConfig
@@ -283,6 +293,60 @@ uint8 AggregatePlayerLevel(std::vector<uint8> levels, bool useMax);
 // UINT32_MAX on overflow. Separated out so unit tests can exercise it
 // without standing up a live session.
 uint32 ComputeMultipliedValue(uint32 baseline, float mult);
+
+// Slice 10 — effort-anchored per-kill gold floor (pure helpers).
+//
+// The loot-gold problem: a creature's coin is fixed by
+// creature_template.mingold/maxgold, and beasts (wolves, boars) ship
+// with both at 0 — so an empowered-zone wolf that takes 3 mana bars to
+// kill drops literally no money. The floor overrides that with a
+// level-anchored minimum scaled by how much HP the kill actually had
+// (its "effort"), so reward tracks effort at any level/class.
+
+// Smooth level-anchored baseline copper. `base = perLevelCopper *
+// level^exp`, clamped to [0, UINT32_MAX]. Returns 0 for level 0 or a
+// non-positive perLevelCopper (floor disabled for that input).
+uint32 GoldFloorBaseCopper(uint8 level, float perLevelCopper, float exp);
+
+// How many "normal mobs" this kill was worth: clamp(mobMaxHp / refHp,
+// minF, maxF). `refHp` is the expected HP of a normal mob at the kill's
+// level — so an empowered mob scaled to ~7x native HP reads as ~7x
+// effort (clamped at maxF). Returns minF when either input is 0 or refHp
+// is unusable. `maxF` is floored up to `minF` defensively.
+float KillEffortFactor(uint32 mobMaxHp, uint32 refHp, float minF, float maxF);
+
+// Compose `baseCopper * effort * tierGoldRoll`, clamped to `capCopper`
+// (0 = no cap). Returns 0 when any multiplicative input is non-positive.
+uint32 ComputeGoldFloorCopper(uint32 baseCopper, float effort,
+                              float tierGoldRoll, uint32 capCopper);
+
+// Slice 10 Pass 2 — per-TZ "contract" credit + mailed reward (pure).
+// Credit accrues per eligible kill while the player is in an empowered
+// zone; when the rotation ends, a gold (+ optional gear) reward scaled by
+// total credit is mailed. Decouples reward density from per-mob loot
+// tables and rewards time invested rather than per-kill RNG.
+
+// Credit for one kill: `mobMaxHp / divisor`, min 1 for any real kill.
+uint32 KillCredit(uint32 mobMaxHp, uint32 divisor);
+
+// Mailed gold = `credit * goldPerCredit * tierMult`, clamped to
+// `capCopper` (0 = no cap). Returns 0 on any non-positive input.
+uint32 ContractGoldCopper(uint32 credit, uint32 goldPerCredit,
+                          float tierMult, uint32 capCopper);
+
+// Level → class-drop band index (8 brackets: <10→0, 10-19→1, …, 80→7).
+// Mirrors the Slice 9 bucketing so mailed gear lands in the player's band.
+uint8 ContractBandIndexForLevel(uint8 level);
+
+// Slice 10 Pass 3 — group HP scaling (Model C). The HP multiplier applied
+// to an empowered-zone mob when a grouped player engages it, so a group
+// fight stays as challenging per-capita as a solo one.
+//   factor = 1 + (sumOtherEhp / tapperEhp) * dampen, clamped to [1, cap].
+// `sumOtherEhp` is the summed max-health of the tapping player's other
+// group members present in the zone; `tapperEhp` is the engaging player's
+// max health. Pure + unit-tested.
+float GroupHpFactor(uint64 sumOtherEhp, uint32 tapperEhp,
+                    float dampen, float cap);
 
 // Pure weighted-draw for Slice 4 flavor selection. Weights are indexed by
 // (Flavor - 1), so a 5-wide weights array covers BLOODBATH..MERCHANTS.
@@ -603,8 +667,69 @@ public:
     // empowered zone or the rewards layer is disabled. Each mutates the
     // reward in place.
     void ApplyXpMultiplier(uint32& amount, Player* player) const;
-    void ApplyGoldMultiplier(uint32& gold, Player* player) const;
+    // Loot-time gold multiply. Takes the full Loot* (not just the gold
+    // field) so the Slice 10 floor path can identify bundles already
+    // finalized at kill time and skip a second multiply. Mutates
+    // loot->gold in place.
+    void ApplyGoldMultiplier(Loot* loot, Player* player) const;
     void ApplyQuestGoldMultiplier(int32& moneyRew, Player* player) const;
+
+    // Slice 10 — kill-time loot-gold floor. Called from
+    // OnPlayerCreatureKill (after generateMoneyLoot has run) so a
+    // creature with native mingold/maxgold = 0 still ends up with a
+    // visible, effort-scaled coin pile. Sets `killed->loot.gold` to
+    // max(empowered-multiplied gold, level/effort floor) and records the
+    // bundle target so the later OnPlayerBeforeLootMoney click is a
+    // no-op restore rather than a second multiply. No-op when the floor
+    // is disabled or the killer isn't in an empowered zone.
+    void ApplyKillGoldFloor(Creature* killed, Player* killer);
+
+    // --- Slice 10 Pass 2: per-TZ contract + mailed reward ---
+    bool IsContractEnabled() const { return _enabled && _contractEnabled; }
+
+    // Accrue contract credit for an eligible kill in an empowered zone.
+    // Write-through: upserts the per-(guid, rotation, zone) row in
+    // character_terror_zones_progress (capped), capturing the killer's
+    // level / class / spec / zone tier for the offline mail-out. Splits
+    // across the killer's group members standing in the same zone.
+    // Called from OnPlayerCreatureKill.
+    void AccrueContractCredit(Creature* killed, Player* killer);
+
+    // Settle + mail every unmailed contract whose rotation has ended
+    // (tick_at < beforeTickAt). Gold (+ optional archetype gear when
+    // credit clears the threshold) scaled by stored credit/tier, mailed
+    // to the character by guid (offline-safe), then the settled rows are
+    // deleted. Called from RunRotation once the new rotation is live.
+    void MailContractRewards(uint64 beforeTickAt);
+
+    // Current banked contract credit for (guid, zone) in the active
+    // rotation — used by `.zones` to show progress. DB-backed read.
+    uint32 GetContractCreditFor(uint32 guidLow, uint32 zoneId) const;
+
+    // --- Teleport unlock ---
+    bool IsTeleportEnabled() const { return _enabled && _teleportEnabled; }
+
+    // Cumulative (not rotation-scoped) credit toward the Tier-`tier`
+    // teleport unlock. Called alongside AccrueContractCredit for the same
+    // kill/credit — independent bucket, no rotation cap, never resets. On
+    // first crossing the configured threshold, grants the single
+    // multi-tier beacon item (if not already owned) and announces it.
+    void AccrueTierTeleportCredit(Player* player, uint8 tier, uint32 addCredit);
+
+    // Whether `player` has unlocked the Tier-`tier` teleport destination.
+    // In-session working copy of character_terror_zones_tier_progress —
+    // used by the beacon item's gossip menu to decide which tiers to list.
+    bool IsTierUnlockedFor(Player const* player, uint8 tier) const;
+
+    // Teleports `player` to whichever pool zone is currently empowered at
+    // `tier` in the active rotation. Sends a chat error and returns false
+    // if no slot is at that tier right now, or the zone has no configured
+    // landing point yet (tp_map unset). Called from the beacon item's
+    // gossip-select handler.
+    bool TeleportPlayerToTier(Player* player, uint8 tier);
+
+    void LoadTierTeleportProgress(Player* player);
+    void UnloadTierTeleportProgress(ObjectGuid guid);
 
     // Drop-quality tier bump. Returns true when `item->itemid` was
     // substituted for a higher-rarity template matching its level band.
@@ -754,6 +879,19 @@ public:
     // attacker, empowered zone, event-boss bonus if indexed.
     void OnUnitDealDamage(Unit* attacker, Unit* victim, uint32& damage);
 
+    // Slice 10 Pass 3 — engage-time group HP scaling (Model C). Fires
+    // from the same OnDamage hook for player→creature hits. On the first
+    // hit on a full-HP eligible empowered mob (tracked per rotation), if
+    // the attacker is grouped, multiplies the mob's max HP by
+    // GroupHpFactor(...) over the group's combined live EHP. Per-hit
+    // damage is unchanged. No-op for solo players / event bosses.
+    void ApplyGroupHpScaling(Unit* attacker, Unit* victim);
+
+    // Release a killed creature's guid from the group-scale tracking set
+    // so it re-scales on respawn within the same rotation. Called from
+    // OnPlayerCreatureKill.
+    void OnCreatureKilled(Creature* killed);
+
     // Slice 8 Pass-2 loot-pool content load. Called from
     // InitializeOnStartup after LoadEventContent.
     void LoadEventBossLootPool();
@@ -890,6 +1028,18 @@ private:
     void RunRotation(uint64 tickAt, bool announce);
     void AnnounceRotation(ActiveRotation const& rot);
 
+    // Slice 10 — shared empowered-zone loot-gold math, extracted from
+    // ApplyGoldMultiplier so the kill-time floor path can compute the
+    // same multiplied value without re-running the loot-time hook.
+    // Applies the level-uplift factor + flat/tier/flavor gold roll to
+    // `nativeGold`. `slot` is the caller-resolved active slot for `zoneId`.
+    uint32 ComputeEmpoweredGold(uint32 nativeGold, uint32 zoneId,
+                                ActiveSlot const& slot) const;
+    // The gold roll factor for a slot (tier roll when tiers are on,
+    // else the flat per-flavor boost, else 1.0). Shared by the multiply
+    // path and the floor path so both read the same deterministic value.
+    float EffectiveGoldRoll(ActiveSlot const& slot) const;
+
     // Slice 7 — per-category gating helper. Compose `globalMask`,
     // the player's master toggle, and the player's per-category
     // bitmask. World-thread-only access to `_prefs`; no
@@ -1019,6 +1169,68 @@ private:
     // extra loot-gold uplift inside an empowered zone. 0 = no uplift; 1 =
     // linear with level; 2 = quadratic (tracks WoW's gold-by-level curve).
     float _goldLevelRatioExp = 2.0f;
+
+    // Slice 10 — effort-anchored gold floor. When enabled, loot gold is
+    // computed at kill time (so 0-coin beasts still pay out) as
+    // max(empowered-multiplied gold, base(level) * effort * goldRoll),
+    // capped at _goldFloorCapCopper. See ApplyKillGoldFloor.
+    bool   _goldFloorEnabled       = true;
+    float  _goldFloorPerLevelCopper = 0.5f;
+    float  _goldFloorExp           = 2.0f;
+    float  _goldFloorEffortMin     = 1.0f;
+    float  _goldFloorEffortMax     = 12.0f;
+    float  _goldFloorRefHpPerLevel = 130.0f;
+    uint32 _goldFloorCapCopper     = 500000;  // 50g hard ceiling per kill
+
+    // Per-bundle final gold target set by ApplyKillGoldFloor and restored
+    // by ApplyGoldMultiplier on the loot-money click (generateMoneyLoot /
+    // a second multiply must not clobber or re-inflate it). Keyed by the
+    // Loot* pointer cast to uint64, same scheme as _eventBossGoldTargets;
+    // TTL-cleared on the same cadence.
+    std::unordered_map<uint64 /*bundleKey*/, uint32 /*goldTarget*/>
+        _goldFloorTargets;
+    uint64 _goldFloorTargetsClearedAt = 0;
+
+    // Slice 10 Pass 2 — per-TZ contract + mailed reward. Credit accrues
+    // write-through to character_terror_zones_progress on each eligible
+    // kill; the rotation-end mail-out reads that table (offline-safe).
+    bool   _contractEnabled              = true;
+    uint32 _contractCreditPerKillDivisor = 1000;  // credit = mobMaxHp / this
+    uint32 _contractCreditCapPerZone     = 3000;  // per player per zone/rotation
+    uint32 _contractGoldPerCreditCopper  = 30;    // gold = credit * this * tierMult
+    uint32 _contractGoldCapCopper        = 2000000;   // 200g ceiling per mail
+    uint32 _contractGearCreditThreshold  = 1500;  // min credit to roll mailed gear
+    // Per-tier gold multiplier for the mailed lump sum (index 0 = TIER_NONE).
+    float  _contractTierGoldMult[TIER_MAX + 1] =
+        {1.0f, 1.0f, 1.3f, 1.7f, 2.2f, 3.0f};
+    // Player-facing progress feedback.
+    bool   _contractAnnounceProgress   = true;
+    uint32 _contractProgressEveryCredit = 100;  // periodic "credit banked" line
+
+    // Messaging-only running credit per (guidLow<<32 | zoneId) for the
+    // current session/rotation. Drives the zone-entry / gear-threshold /
+    // periodic chat lines (the DB row is the reward source of truth; this
+    // is best-effort and reset each rotation tick). Not persisted.
+    std::unordered_map<uint64, uint32> _contractMsgCredit;
+
+    // --- Teleport unlock ---
+    bool   _teleportEnabled = true;
+    // Index by tier (1-5); [0] unused.
+    uint32 _teleportUnlockThreshold[TIER_MAX + 1] = {0, 800, 1200, 1800, 2600, 4000};
+    // Single multi-tier beacon item (entry id), granted once on first
+    // unlock. Its gossip menu lists whichever tiers _tierProgress marks
+    // unlocked — no per-tier item/spell needed.
+    uint32 _teleportItemEntry = 0;
+
+    struct TierProgress
+    {
+        uint32 lifetimeCredit = 0;
+        bool   unlocked = false;
+    };
+    // guidLow -> per-tier progress ([0] unused), loaded whole at login,
+    // erased at logout. character_terror_zones_tier_progress is the
+    // source of truth; this is just the in-session working copy.
+    std::unordered_map<uint32, std::array<TierProgress, TIER_MAX + 1>> _tierProgress;
 
     // (quality << 8) | band → vector of itemIds. Built once at startup.
     std::unordered_map<uint32, std::vector<uint32>> _rarityIndex;
@@ -1160,6 +1372,16 @@ private:
         {0, 0, 0, 150, 250, 400};
     float  _eliteHpMultUplift     = 1.5f;
     float  _eliteDamageMultUplift = 1.3f;
+
+    // Slice 10 Pass 3 — engage-time group HP scaling (Model C).
+    bool   _groupScalingEnabled   = true;
+    float  _groupScalingDampen    = 0.75f;  // per extra-member-EHP weight
+    float  _groupScalingMaxFactor = 8.0f;   // HP-factor ceiling
+    // Creatures already group-scaled this rotation (raw ObjectGuid). A
+    // mob scales at most once per engagement; killing it releases the
+    // guid (OnCreatureKilled) so a respawn re-scales. Cleared each
+    // rotation tick. World-thread-only (combat + kill + tick all there).
+    std::unordered_set<uint64> _groupScaledGuids;
 
     bool  _eventBossLootPoolEnabled      = true;
     float _eventBossLootPurpleMultiplier = 1.0f;

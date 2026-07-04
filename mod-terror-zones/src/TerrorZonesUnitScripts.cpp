@@ -24,8 +24,11 @@ namespace
         void OnDamage(Unit* attacker, Unit* victim,
                       uint32& damage) override
         {
-            TerrorZonesMgr::Instance().OnUnitDealDamage(attacker, victim,
-                                                         damage);
+            auto& mgr = TerrorZonesMgr::Instance();
+            // Slice 8 — creature outgoing-damage mult.
+            mgr.OnUnitDealDamage(attacker, victim, damage);
+            // Slice 10 Pass 3 — engage-time group HP scaling (player→mob).
+            mgr.ApplyGroupHpScaling(attacker, victim);
         }
     };
 }

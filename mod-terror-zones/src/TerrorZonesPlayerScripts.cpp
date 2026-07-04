@@ -15,6 +15,7 @@ namespace
         void OnPlayerLogin(Player* player) override
         {
             TerrorZonesMgr::Instance().OnPlayerLogin(player);
+            TerrorZonesMgr::Instance().LoadTierTeleportProgress(player);
         }
 
         void OnPlayerLogout(Player* player) override
@@ -24,6 +25,7 @@ namespace
             auto& mgr = TerrorZonesMgr::Instance();
             mgr.FlushPlayerPref(player);
             mgr.UnloadPlayerPref(player->GetGUID());
+            mgr.UnloadTierTeleportProgress(player->GetGUID());
         }
 
         void OnPlayerSave(Player* player) override

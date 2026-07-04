@@ -15,7 +15,9 @@
 #include "Group.h"
 #include "GroupReference.h"
 #include "Log.h"
+#include "Map.h"
 #include "Player.h"
+#include "Weather.h"
 #include "World.h"
 #include "WorldSession.h"
 #include "WorldSessionMgr.h"
@@ -182,6 +184,84 @@ void TerrorZonesMgr::LoadConfig()
         "TerrorZones.Rewards.GoldLevelRatioExp", 2.0f);
     if (_goldLevelRatioExp < 0.0f)
         _goldLevelRatioExp = 0.0f;
+
+    // Slice 10 — effort-anchored gold floor.
+    _goldFloorEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Rewards.GoldFloor.Enable", true);
+    _goldFloorPerLevelCopper = sConfigMgr->GetOption<float>(
+        "TerrorZones.Rewards.GoldFloor.PerLevelCopper", 0.5f);
+    if (_goldFloorPerLevelCopper < 0.0f)
+        _goldFloorPerLevelCopper = 0.0f;
+    _goldFloorExp = sConfigMgr->GetOption<float>(
+        "TerrorZones.Rewards.GoldFloor.Exp", 2.0f);
+    if (_goldFloorExp < 0.0f)
+        _goldFloorExp = 0.0f;
+    _goldFloorEffortMin = sConfigMgr->GetOption<float>(
+        "TerrorZones.Rewards.GoldFloor.EffortMin", 1.0f);
+    if (_goldFloorEffortMin < 0.0f)
+        _goldFloorEffortMin = 0.0f;
+    _goldFloorEffortMax = sConfigMgr->GetOption<float>(
+        "TerrorZones.Rewards.GoldFloor.EffortMax", 12.0f);
+    if (_goldFloorEffortMax < _goldFloorEffortMin)
+        _goldFloorEffortMax = _goldFloorEffortMin;
+    _goldFloorRefHpPerLevel = sConfigMgr->GetOption<float>(
+        "TerrorZones.Rewards.GoldFloor.RefHpPerLevel", 130.0f);
+    if (_goldFloorRefHpPerLevel < 1.0f)
+        _goldFloorRefHpPerLevel = 1.0f;
+    _goldFloorCapCopper = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Rewards.GoldFloor.CapCopper", 500000);
+
+    // Slice 10 Pass 2 — per-TZ contract + mailed reward.
+    _contractEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Contract.Enable", true);
+    _contractCreditPerKillDivisor = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.CreditPerKillDivisor", 1000);
+    if (_contractCreditPerKillDivisor == 0)
+        _contractCreditPerKillDivisor = 1;
+    _contractCreditCapPerZone = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.CreditCapPerZone", 3000);
+    _contractGoldPerCreditCopper = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.GoldPerCreditCopper", 30);
+    _contractGoldCapCopper = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.GoldCapCopper", 2000000);
+    _contractGearCreditThreshold = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.GearCreditThreshold", 1500);
+    _contractTierGoldMult[TIER_1] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T1", 1.0f);
+    _contractTierGoldMult[TIER_2] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T2", 1.3f);
+    _contractTierGoldMult[TIER_3] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T3", 1.7f);
+    _contractTierGoldMult[TIER_4] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T4", 2.2f);
+    _contractTierGoldMult[TIER_5] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T5", 3.0f);
+    _contractTierGoldMult[TIER_NONE] = _contractTierGoldMult[TIER_1];
+    for (uint32 i = 0; i <= TIER_MAX; ++i)
+        if (_contractTierGoldMult[i] < 0.0f)
+            _contractTierGoldMult[i] = 0.0f;
+    _contractAnnounceProgress = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Contract.AnnounceProgress", true);
+    _contractProgressEveryCredit = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.ProgressEveryCredit", 100);
+
+    // --- Teleport unlock ---
+    _teleportEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Teleport.Enable", true);
+    _teleportUnlockThreshold[TIER_1] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T1", 800);
+    _teleportUnlockThreshold[TIER_2] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T2", 1200);
+    _teleportUnlockThreshold[TIER_3] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T3", 1800);
+    _teleportUnlockThreshold[TIER_4] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T4", 2600);
+    _teleportUnlockThreshold[TIER_5] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T5", 4000);
+    // 0 (default) means "not configured" — no item entry assigned yet, so
+    // an unlock has nothing to grant.
+    _teleportItemEntry = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.ItemEntry", 0);
 
     // --- Slice 4 — flavors ---
     _flavorsEnabled = sConfigMgr->GetOption<bool>(
@@ -493,6 +573,16 @@ void TerrorZonesMgr::LoadConfig()
         "TerrorZones.Combat.Elite.DamageMult", 1.3f);
     if (_eliteDamageMultUplift < 1.0f) _eliteDamageMultUplift = 1.0f;
 
+    // Slice 10 Pass 3 — group HP scaling.
+    _groupScalingEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Combat.GroupScaling.Enable", true);
+    _groupScalingDampen = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.GroupScaling.Dampen", 0.75f);
+    if (_groupScalingDampen < 0.0f) _groupScalingDampen = 0.0f;
+    _groupScalingMaxFactor = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.GroupScaling.MaxFactor", 8.0f);
+    if (_groupScalingMaxFactor < 1.0f) _groupScalingMaxFactor = 1.0f;
+
     LOG_INFO("module",
              "mod-terror-zones: enabled={}, debug={}, interval={}s, slots={}, "
              "recency(window={}, mult={:.3f}), levelWindow={}, "
@@ -685,7 +775,8 @@ void TerrorZonesMgr::LoadPool()
     _poolIndex.clear();
 
     QueryResult result = WorldDatabase.Query(
-        "SELECT zone_id, display_name, level_min, level_max, enabled "
+        "SELECT zone_id, display_name, level_min, level_max, enabled, "
+        "tp_map, tp_x, tp_y, tp_z, tp_o "
         "FROM terror_zones_pool");
 
     if (!result)
@@ -705,6 +796,11 @@ void TerrorZonesMgr::LoadPool()
         e.levelMin    = f[2].Get<uint16>();
         e.levelMax    = f[3].Get<uint16>();
         e.enabled     = f[4].Get<uint8>() != 0;
+        e.tpMap       = f[5].Get<int32>();
+        e.tpX         = f[6].Get<float>();
+        e.tpY         = f[7].Get<float>();
+        e.tpZ         = f[8].Get<float>();
+        e.tpO         = f[9].Get<float>();
         // Resolve the zone's continent (map id) from the core DBC so
         // SelectZonesPerContinent can empower one zone per continent.
         if (AreaTableEntry const* area = sAreaTableStore.LookupEntry(e.zoneId))
@@ -754,8 +850,31 @@ void TerrorZonesMgr::InitializeOnStartup()
     if (r)
         lastTickAt = r->Fetch()[0].Get<uint64>();
 
+    // Resume whenever the persisted rotation is current or newer than our
+    // locally-computed boundary, not just on an exact match. A strict
+    // `!=` here means any backward clock skew between worldserver restarts
+    // (container clock briefly behind the previous instance's wall-clock —
+    // observed in practice with frequent dev restarts) makes
+    // `currentBoundary` resolve OLDER than `lastTickAt`. That used to fail
+    // the equality check and run a brand-new RunRotation for the stale,
+    // already-superseded boundary — re-picking zones (including ones that
+    // still have a live, unexpired AlwaysSpawn world-boss event from the
+    // newer rotation) and spawning a second boss on top of it. Treating
+    // `lastTickAt >= currentBoundary` as "still current" closes that gap:
+    // we only start a genuinely fresh rotation when wall-clock has moved
+    // strictly past the last persisted tick.
     bool needFreshRotation = _startupForceTick
-                          || (lastTickAt != currentBoundary);
+                          || (lastTickAt < currentBoundary);
+    if (!_startupForceTick && lastTickAt > currentBoundary)
+    {
+        LOG_WARN("module",
+                 "mod-terror-zones: startup boundary {} is older than the "
+                 "latest persisted rotation tick_at={} (clock skew since "
+                 "last restart?); resuming the newer rotation instead of "
+                 "starting a stale one.",
+                 currentBoundary, lastTickAt);
+        currentBoundary = lastTickAt;
+    }
 
     if (!needFreshRotation)
     {
@@ -1142,6 +1261,18 @@ void TerrorZonesMgr::RunRotation(uint64 tickAt, bool announce)
         // thing the player sees from this rotation.
         SendRotationEndLineFor(z, zn.second);
     }
+
+    // Slice 10 Pass 2 — settle + mail the bounties of the rotation(s)
+    // that just ended: every unmailed contract row with tick_at < this
+    // new tick. Offline-safe + restart-recovering (a missed rotation's
+    // rows are mailed on the next tick). Runs after the tick-off rescale
+    // so it's the last thing tied to the ending rotation.
+    MailContractRewards(tickAt);
+    // New rotation begins — reset the best-effort progress-message cache
+    // and the per-rotation group-scale tracking set.
+    _contractMsgCredit.clear();
+    _groupScaledGuids.clear();
+
     for (size_t i = 0; i < picks.size(); ++i)
     {
         uint32 z = picks[i];
@@ -1737,6 +1868,26 @@ void TerrorZonesMgr::OnPlayerUpdateZone(Player* player, uint32 newZone)
     {
         if (IsCategoryEnabledFor(player, ANNOUNCE_ZONE_LEAVE))
             SendZoneLeaveLineTo(player, oldName);
+
+        // Core gap: Map::SendZoneDynamicInfo (called earlier in the same
+        // Player::UpdateZone, just before this hook fires) silently no-ops
+        // for newZone if that zone has never had a _zoneDynamicInfo entry
+        // created — which is exactly the case for any zone with no
+        // game_weather rows. That left a flavor's weather override (e.g.
+        // Bloodbath's BLACKRAIN) rendering forever on the client once a
+        // player walked out of the empowered zone into one of those.
+        // Mirror the zone-data lookup ourselves: if the destination zone
+        // genuinely has weather data, GetOrGenerateZoneDefaultWeather is a
+        // harmless idempotent re-check (core already created/sent it);
+        // if it doesn't, force an explicit FINE push so the override can't
+        // linger.
+        if (Map* map = player->GetMap())
+        {
+            if (Weather* w = map->GetOrGenerateZoneDefaultWeather(newZone))
+                w->SendWeatherUpdateToPlayer(player);
+            else
+                Weather::SendFineWeatherUpdateToPlayer(player);
+        }
     }
 
     // Entry-line: fired when the player crosses into an empowered

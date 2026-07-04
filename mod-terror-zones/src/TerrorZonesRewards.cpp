@@ -10,6 +10,7 @@
 
 #include "TerrorZonesMgr.h"
 
+#include "Creature.h"
 #include "ItemTemplate.h"
 #include "Log.h"
 #include "LootMgr.h"
@@ -21,6 +22,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <limits>
 #include <random>
 #include <unordered_set>
@@ -118,18 +120,20 @@ void TerrorZonesMgr::ApplyXpMultiplier(uint32& amount, Player* player) const
                  rolledOrFlavor, effectiveMult);
 }
 
-void TerrorZonesMgr::ApplyGoldMultiplier(uint32& gold, Player* player) const
+float TerrorZonesMgr::EffectiveGoldRoll(ActiveSlot const& slot) const
 {
-    if (!IsRewardsEnabled() || gold == 0)
-        return;
-    if (!player || !player->IsInWorld())
-        return;
+    if (_tierEnabled && slot.tier != TIER_NONE)
+        return RollAxis(slot, AXIS_GOLD);
+    if (slot.flavor != FLAVOR_NONE)
+        return _flavorGoldBoost[slot.flavor - 1];
+    return 1.0f;
+}
 
-    uint32 before = gold;
-    uint32 zoneId = player->GetZoneId();
-    ActiveSlot slot;
-    if (!TryGetSlotForZone(zoneId, slot))
-        return;
+uint32 TerrorZonesMgr::ComputeEmpoweredGold(uint32 nativeGold, uint32 zoneId,
+                                            ActiveSlot const& slot) const
+{
+    if (nativeGold == 0)
+        return 0;
 
     // Loot gold is template-fixed (creature_template.mingold / maxgold),
     // so a level-20 mob scaled to 70 still drops level-20 amounts. Layer
@@ -152,34 +156,127 @@ void TerrorZonesMgr::ApplyGoldMultiplier(uint32& gold, Player* player) const
         }
     }
 
-    float rolledOrFlavor;
-    float effectiveMult;
-    char const* source;
-    if (_tierEnabled && slot.tier != TIER_NONE)
+    float effectiveMult = _goldMultiplier * levelFactor
+                        * EffectiveGoldRoll(slot);
+    return ComputeMultipliedValue(nativeGold, effectiveMult);
+}
+
+void TerrorZonesMgr::ApplyGoldMultiplier(Loot* loot, Player* player) const
+{
+    if (!IsRewardsEnabled() || !loot)
+        return;
+    if (!player || !player->IsInWorld())
+        return;
+
+    uint32 zoneId = player->GetZoneId();
+    ActiveSlot slot;
+    if (!TryGetSlotForZone(zoneId, slot))
+        return;
+
+    // Slice 10 — when the floor is on, creature loot gold was already
+    // finalized at kill time (ApplyKillGoldFloor). For such a bundle this
+    // hook only restores the recorded target so the loot-money click
+    // can't multiply it a second time. Bundles the floor never touched
+    // (gameobject / chest / fishing gold, or any non-creature loot) fall
+    // through and multiply normally so their empowered uplift still applies.
+    if (_goldFloorEnabled)
     {
-        rolledOrFlavor = RollAxis(slot, AXIS_GOLD);
-        effectiveMult = _goldMultiplier * levelFactor * rolledOrFlavor;
-        source = "tier";
+        uint64 bundleKey = static_cast<uint64>(
+            reinterpret_cast<uintptr_t>(loot));
+        auto it = _goldFloorTargets.find(bundleKey);
+        if (it != _goldFloorTargets.end())
+        {
+            if (loot->gold < it->second)
+                loot->gold = it->second;
+            return;
+        }
     }
-    else
-    {
-        rolledOrFlavor = (slot.flavor != FLAVOR_NONE)
-                       ? _flavorGoldBoost[slot.flavor - 1]
-                       : 1.0f;
-        effectiveMult = _goldMultiplier * levelFactor * rolledOrFlavor;
-        source = "flavor";
-    }
-    gold = ComputeMultipliedValue(gold, effectiveMult);
+
+    if (loot->gold == 0)
+        return;
+
+    uint32 before = loot->gold;
+    loot->gold = ComputeEmpoweredGold(loot->gold, zoneId, slot);
     if (_debug)
         LOG_INFO("module",
                  "mod-terror-zones: loot gold multiplier zone={} flavor={} "
-                 "tier={} mob_level={} from={} to={} "
-                 "(flat x{:.2f} * level x{:.2f} * {} x{:.3f} = x{:.3f})",
+                 "tier={} from={} to={}",
+                 zoneId, FlavorDisplayName(slot.flavor),
+                 TierDisplayName(slot.tier), before, loot->gold);
+}
+
+void TerrorZonesMgr::ApplyKillGoldFloor(Creature* killed, Player* killer)
+{
+    if (!IsRewardsEnabled() || !_goldFloorEnabled)
+        return;
+    if (!killed || !killer || !killer->IsInWorld())
+        return;
+
+    // Event bosses own their coin via the boss loot pool
+    // (TryEventBossDrop + ApplyEventBossGoldUplift) — leave them alone.
+    if (_eventBossSpawnIndex.count(killed->GetGUID().GetRawValue()))
+        return;
+    // Only the empowered-zone threats earn the floor; critters, pets,
+    // totems, triggers, world bosses, and friendly NPCs are excluded by
+    // the same predicate the level-scaler uses.
+    if (!IsScalingEligible(killed))
+        return;
+
+    uint32 zoneId = killer->GetZoneId();
+    ActiveSlot slot;
+    if (!TryGetSlotForZone(zoneId, slot))
+        return;
+
+    // Native coin survives generateMoneyLoot (which has already run by
+    // the OnPlayerCreatureKill seam). Apply the standard empowered
+    // multiply, then take the max with the level/effort floor — so a
+    // 0-coin beast still pays out, while a coin-bearing humanoid keeps
+    // whichever is larger. The multiply happens here (not at loot-money
+    // click) so the pile is correct even if the player never clicks a
+    // small native amount.
+    uint8 scaledLevel = ComputeTargetLevel(zoneId);
+    uint8 refLevel = scaledLevel > 0 ? scaledLevel : killer->GetLevel();
+
+    uint32 multiplied = ComputeEmpoweredGold(killed->loot.gold, zoneId, slot);
+
+    uint32 refHp = static_cast<uint32>(
+        _goldFloorRefHpPerLevel * static_cast<float>(refLevel));
+    float effort = KillEffortFactor(killed->GetMaxHealth(), refHp,
+                                    _goldFloorEffortMin, _goldFloorEffortMax);
+    uint32 base = GoldFloorBaseCopper(refLevel, _goldFloorPerLevelCopper,
+                                      _goldFloorExp);
+    uint32 floorGold = ComputeGoldFloorCopper(base, effort,
+                                              EffectiveGoldRoll(slot),
+                                              _goldFloorCapCopper);
+
+    uint32 finalGold = std::max(multiplied, floorGold);
+    if (finalGold == 0)
+        return;
+
+    // Periodic TTL clear, same scheme as the other per-bundle dedup maps.
+    uint64 now = static_cast<uint64>(::time(nullptr));
+    if (now - _goldFloorTargetsClearedAt > 30
+        || _goldFloorTargets.size() > 10000)
+    {
+        _goldFloorTargets.clear();
+        _goldFloorTargetsClearedAt = now;
+    }
+    uint64 bundleKey = static_cast<uint64>(
+        reinterpret_cast<uintptr_t>(&killed->loot));
+    _goldFloorTargets[bundleKey] = finalGold;
+    if (killed->loot.gold < finalGold)
+        killed->loot.gold = finalGold;
+
+    if (_debug)
+        LOG_INFO("module",
+                 "mod-terror-zones: kill gold floor zone={} flavor={} tier={} "
+                 "mob_level={} mob_hp={} effort={:.2f} base={} floor={} "
+                 "multiplied={} final={}",
                  zoneId, FlavorDisplayName(slot.flavor),
                  TierDisplayName(slot.tier),
-                 static_cast<uint32>(scaledLevel),
-                 before, gold, _goldMultiplier, levelFactor,
-                 source, rolledOrFlavor, effectiveMult);
+                 static_cast<uint32>(refLevel),
+                 killed->GetMaxHealth(), effort, base, floorGold,
+                 multiplied, finalGold);
 }
 
 void TerrorZonesMgr::ApplyQuestGoldMultiplier(int32& moneyRew, Player* player) const

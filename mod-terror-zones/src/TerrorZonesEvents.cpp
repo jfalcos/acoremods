@@ -370,6 +370,13 @@ void TerrorZonesMgr::ScheduleEvents(uint64 tickAt,
         slotScaledLevel[i] = (lvl == 0) ? 1 : lvl;
     }
 
+    // A GM-forced tick advances to the *next* aligned boundary, so tickAt
+    // can be in the future relative to wall-clock. The guaranteed boss is
+    // meant to be up the moment the rotation goes live, so clamp its start
+    // to "now" — a normal boundary tick has now ≈ tickAt, so this is a
+    // no-op there.
+    uint64 nowSec = static_cast<uint64>(::time(nullptr));
+
     std::vector<ActiveEvent> newEvents;
 
     for (size_t i = 0; i < slots.size(); ++i)
@@ -397,6 +404,25 @@ void TerrorZonesMgr::ScheduleEvents(uint64 tickAt,
                     if (d.weight == 0) continue;
                     cands.push_back(k);
                     total += d.weight;
+                }
+                // AlwaysSpawn fallback: an empty zone at tick time resolves
+                // scaledLevel to 1 (no real players present), and a zone
+                // whose curated boss sits outside that band would otherwise
+                // veto the guaranteed boss. When AlwaysSpawn is on, re-collect
+                // the zone's enabled bosses ignoring the level window — the
+                // boss still scales to the right level at spawn via
+                // ComputeEventBossApex. Non-AlwaysSpawn behavior is unchanged.
+                if ((cands.empty() || total == 0) && _eventBossAlwaysSpawn)
+                {
+                    total = 0;
+                    for (size_t k = 0; k < bossDefs.size(); ++k)
+                    {
+                        EventBossDef const& d = bossDefs[k];
+                        if (d.zoneId != zoneId || d.weight == 0)
+                            continue;
+                        cands.push_back(k);
+                        total += d.weight;
+                    }
                 }
                 if (cands.empty() || total == 0)
                     return false;
@@ -473,8 +499,10 @@ void TerrorZonesMgr::ScheduleEvents(uint64 tickAt,
         // FireChance gate and the SelectEventType weighted draw: every
         // empowered slot gets a world boss that is up at rotation start
         // and lasts the whole rotation window. The optional second
-        // event still rolls below. When the zone has no curated boss
-        // content, we log and fall back to the normal probabilistic
+        // event still rolls below (for non-boss variety — see the
+        // EVENT_WORLD_BOSS exclusion at the roll site). When the zone has
+        // no curated boss content, we log and fall back to the normal
+        // probabilistic
         // path so the slot can still get a node surge.
         bool bossScheduled = false;
         if (_eventBossAlwaysSpawn)
@@ -499,7 +527,7 @@ void TerrorZonesMgr::ScheduleEvents(uint64 tickAt,
                 evt.eventId        = slotEventId++;
                 evt.type           = EVENT_WORLD_BOSS;
                 evt.state          = EVENT_STATE_PENDING;
-                evt.startsAt       = tickAt;                 // up at rotation start
+                evt.startsAt       = std::min<uint64>(tickAt, nowSec);  // up now
                 evt.endsAt         = tickAt + _intervalSec;  // full rotation window
                 evt.zoneId         = slot.zoneId;
                 evt.mapId          = bMapId;
@@ -533,7 +561,17 @@ void TerrorZonesMgr::ScheduleEvents(uint64 tickAt,
         {
             if (e == 1 && !ShouldFireSecondEvent(cfg.secondChance, rng))
                 break;
-            EventType type = SelectEventType(cfg, rng);
+
+            // The guaranteed boss above already covers EVENT_WORLD_BOSS for
+            // this slot — exclude it from this roll's candidate pool so the
+            // second event can't independently re-pick it and spawn a
+            // duplicate boss in the same zone. Other types (e.g. node
+            // surge) still roll normally.
+            EventScheduleConfig rollCfg = cfg;
+            if (bossScheduled)
+                rollCfg.typeEnabled[EVENT_WORLD_BOSS] = false;
+
+            EventType type = SelectEventType(rollCfg, rng);
             if (type == EVENT_NONE)
                 break;
 
@@ -712,8 +750,13 @@ void TerrorZonesMgr::TickEvents(uint64 now)
     // of which run on the world thread. Read paths (combat hooks,
     // GetEventsSnapshot, TryEventBossDrop) go through the published
     // snapshots, so we can mutate the underlying state freely here.
-    std::vector<std::pair<uint64, uint32>> toFire;
-    std::vector<std::pair<uint64, uint32>> toEnd;
+    // Indices into `_activeEvents`. Keyed by index, not (tickAt, eventId):
+    // eventId is reset per slot, so multiple slots share eventId 0 — a
+    // key-based match would update the wrong event and leave the real one
+    // PENDING to re-fire every tick. FireEvent / EndEvent below don't
+    // resize `_activeEvents`, so these indices stay valid until the prune.
+    std::vector<size_t> toFire;
+    std::vector<size_t> toEnd;
     std::vector<size_t> toPrune;
     std::vector<ActiveEvent> toCountdown;
 
@@ -721,9 +764,9 @@ void TerrorZonesMgr::TickEvents(uint64 now)
     {
         ActiveEvent& e = _activeEvents[i];
         if (e.state == EVENT_STATE_PENDING && now >= e.startsAt)
-            toFire.push_back({e.tickAt, e.eventId});
+            toFire.push_back(i);
         else if (e.state == EVENT_STATE_ACTIVE && now >= e.endsAt)
-            toEnd.push_back({e.tickAt, e.eventId});
+            toEnd.push_back(i);
         else if (e.state == EVENT_STATE_EXPIRED
                  && now >= e.endsAt + 60)
             toPrune.push_back(i);
@@ -752,72 +795,44 @@ void TerrorZonesMgr::TickEvents(uint64 now)
     bool spawnIndexChanged = false;
     bool eventsChanged = !toCountdown.empty();
 
-    for (auto const& key : toFire)
+    for (size_t idx : toFire)
     {
-        ActiveEvent snapshot;
-        bool haveEvt = false;
-        for (ActiveEvent const& e : _activeEvents)
-            if (e.tickAt == key.first && e.eventId == key.second
-                && e.state == EVENT_STATE_PENDING)
-            {
-                snapshot = e;
-                haveEvt = true;
-                break;
-            }
-        if (!haveEvt)
-            continue;
-        FireEvent(snapshot);   // mutates `snapshot`
-        for (ActiveEvent& e : _activeEvents)
-            if (e.tickAt == key.first && e.eventId == key.second)
-            {
-                e.state             = snapshot.state;
-                e.spawnedCreatures  = snapshot.spawnedCreatures;
-                e.spawnedGameObjects= snapshot.spawnedGameObjects;
-                Tier slotTier = TIER_5;
-                if (e.slotIndex < _rotation.slots.size())
-                    slotTier = _rotation.slots[e.slotIndex].tier;
-                if (slotTier == TIER_NONE)
-                    slotTier = TIER_5;
-                for (ObjectGuid const& g : snapshot.spawnedCreatures)
-                {
-                    _eventBossSpawnIndex[g.GetRawValue()] =
-                        {e.tickAt, e.eventId};
-                    _eventBossTierMap[g.GetRawValue()] = slotTier;
-                    spawnIndexChanged = true;
-                }
-                break;
-            }
+        ActiveEvent& e = _activeEvents[idx];
+        if (e.state != EVENT_STATE_PENDING)
+            continue;  // defensive — state changed since collection
+        // FireEvent mutates `e` in place: spawns the boss / surge, sets
+        // e.state = ACTIVE, and persists. Each event is its own index, so
+        // it fires exactly once and can't re-fire.
+        FireEvent(e);
+        Tier slotTier = TIER_5;
+        if (e.slotIndex < _rotation.slots.size())
+            slotTier = _rotation.slots[e.slotIndex].tier;
+        if (slotTier == TIER_NONE)
+            slotTier = TIER_5;
+        for (ObjectGuid const& g : e.spawnedCreatures)
+        {
+            _eventBossSpawnIndex[g.GetRawValue()] = {e.tickAt, e.eventId};
+            _eventBossTierMap[g.GetRawValue()] = slotTier;
+            spawnIndexChanged = true;
+        }
         eventsChanged = true;
     }
-    for (auto const& key : toEnd)
+    for (size_t idx : toEnd)
     {
-        ActiveEvent snapshot;
-        bool haveEvt = false;
-        for (ActiveEvent const& e : _activeEvents)
-            if (e.tickAt == key.first && e.eventId == key.second
-                && e.state == EVENT_STATE_ACTIVE)
-            {
-                snapshot = e;
-                haveEvt = true;
-                break;
-            }
-        if (!haveEvt)
-            continue;
-        EndEvent(snapshot);
-        for (ActiveEvent& e : _activeEvents)
-            if (e.tickAt == key.first && e.eventId == key.second)
-            {
-                e.state              = snapshot.state;
-                for (ObjectGuid const& g : e.spawnedCreatures)
-                {
-                    _eventBossSpawnIndex.erase(g.GetRawValue());
-                    _eventBossTierMap.erase(g.GetRawValue());
-                    spawnIndexChanged = true;
-                }
-                e.spawnedCreatures.clear();
-                e.spawnedGameObjects.clear();
-                break;
-            }
+        ActiveEvent& e = _activeEvents[idx];
+        if (e.state != EVENT_STATE_ACTIVE)
+            continue;  // defensive
+        // Erase the spawn-index entries while the guids are still on `e`,
+        // then EndEvent despawns + sets e.state = EXPIRED + persists.
+        for (ObjectGuid const& g : e.spawnedCreatures)
+        {
+            _eventBossSpawnIndex.erase(g.GetRawValue());
+            _eventBossTierMap.erase(g.GetRawValue());
+            spawnIndexChanged = true;
+        }
+        EndEvent(e);
+        e.spawnedCreatures.clear();
+        e.spawnedGameObjects.clear();
         eventsChanged = true;
     }
     if (!toPrune.empty())
@@ -960,6 +975,10 @@ void TerrorZonesMgr::MarkWorldBossForPlayers()
                 && p->SatisfyQuestLog(/*msg*/ false))
             {
                 p->AddQuest(trackerQuest, nullptr);
+                // Without this the client never receives the quest's text (it
+                // normally arrives via the questgiver dialog) and shows
+                // "Missing Header" in the quest log for this entry.
+                p->PlayerTalkClass->SendQuestGiverQuestDetails(trackerQuest, p->GetGUID(), true);
             }
         }
     }
@@ -1003,6 +1022,39 @@ void TerrorZonesMgr::FireEvent(ActiveEvent& evt)
     {
         case EVENT_WORLD_BOSS:
         {
+            // Defensive guard: ScheduleEvents already excludes
+            // EVENT_WORLD_BOSS from the second-event roll once the
+            // guaranteed boss is scheduled, but the GM `.zones event fire`
+            // path (FireEventNow) bypasses ScheduleEvents entirely and
+            // isn't covered by that fix. Skip spawning a duplicate boss
+            // (without ever going ACTIVE) if another one is already live
+            // in the same zone.
+            bool duplicateBoss = false;
+            for (ActiveEvent const& other : _activeEvents)
+            {
+                if (&other == &evt)
+                    continue;
+                if (other.type == EVENT_WORLD_BOSS
+                    && other.zoneId == evt.zoneId
+                    && other.state == EVENT_STATE_ACTIVE)
+                {
+                    duplicateBoss = true;
+                    break;
+                }
+            }
+            if (duplicateBoss)
+            {
+                LOG_WARN("module",
+                         "mod-terror-zones: skipped duplicate world boss "
+                         "fire — zone={} already has an active world boss "
+                         "(def={}, tick_at={}, slot={})",
+                         evt.zoneId, evt.definitionId, evt.tickAt,
+                         evt.slotIndex);
+                evt.state = EVENT_STATE_EXPIRED;
+                PersistEventState(evt);
+                return;
+            }
+
             EventBossDef const* def = nullptr;
             for (EventBossDef const& d : _eventBossDefs)
                 if (d.id == evt.definitionId)
@@ -1642,6 +1694,11 @@ uint32 TerrorZonesMgr::EndActiveEventsInZone(uint32 zoneId)
 {
     if (zoneId == 0)
         return 0;
+    // Keyed by (tickAt, eventId) is NOT enough: eventId resets per
+    // slot/zone, so multiple zones in the same tick can share
+    // eventId 0 (see TickEvents' index-based rewrite for the same
+    // class of bug). Carry zoneId through both downstream matches
+    // below so we never grab/mutate a different zone's event.
     std::vector<std::pair<uint64, uint32>> toEnd;
     for (ActiveEvent const& e : _activeEvents)
     {
@@ -1659,6 +1716,7 @@ uint32 TerrorZonesMgr::EndActiveEventsInZone(uint32 zoneId)
         bool wasPending = false;
         for (ActiveEvent const& e : _activeEvents)
             if (e.tickAt == key.first && e.eventId == key.second
+                && e.zoneId == zoneId
                 && e.state != EVENT_STATE_EXPIRED)
             {
                 snapshot = e;
@@ -1679,7 +1737,8 @@ uint32 TerrorZonesMgr::EndActiveEventsInZone(uint32 zoneId)
             EndEvent(snapshot);   // despawns entities
         }
         for (ActiveEvent& e : _activeEvents)
-            if (e.tickAt == key.first && e.eventId == key.second)
+            if (e.tickAt == key.first && e.eventId == key.second
+                && e.zoneId == zoneId)
             {
                 e.state = snapshot.state;
                 for (ObjectGuid const& g : e.spawnedCreatures)
