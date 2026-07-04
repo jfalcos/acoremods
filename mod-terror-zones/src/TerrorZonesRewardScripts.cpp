@@ -77,7 +77,7 @@ namespace
             // Slice 3 — tier-bump substitution.
             mgr.TryTierBump(player, item);
             // Slice 4 — Prospector's gathering yield overlay.
-            mgr.TryGatheringYieldBump(player, item, store.GetName());
+            mgr.TryGatheringYieldBump(player, loot, item, store.GetName());
             // Slice 4 — additive unique drop (per-bundle, not per-item).
             mgr.TryUniqueDrop(player, &loot, player->GetZoneId());
             // Slice 6 — additive event-boss bonus drop (no-op in MVP,

@@ -477,6 +477,7 @@ bool TerrorZonesMgr::TryTierBump(Player const* player, ::LootStoreItem* item)
 // --- Prospector's gathering-yield overlay (plan §9.1) ---
 
 bool TerrorZonesMgr::TryGatheringYieldBump(Player const* player,
+                                            Loot& loot,
                                             LootStoreItem* item,
                                             char const* storeName)
 {
@@ -533,18 +534,29 @@ bool TerrorZonesMgr::TryGatheringYieldBump(Player const* player,
         bumped = std::numeric_limits<uint8>::max();
     if (bumped <= before)
         return false;
-    item->maxcount = static_cast<uint8>(bumped);
+    uint32 bonus = bumped - before;
+
+    // Add the bonus as its own stack directly to this roll's `loot`
+    // instance -- item's mincount/maxcount/chance/etc are left untouched,
+    // so the shared template `item` still points into is never mutated.
+    // Core's own (unmodified) roll of `item` still lands normally right
+    // after this hook returns.
+    LootStoreItem bonusItem(item->itemid, 0 /*reference*/, item->chance,
+                             item->needs_quest, item->lootmode,
+                             item->groupid, static_cast<int32>(bonus),
+                             static_cast<uint8>(bonus));
+    bonusItem.conditions = item->conditions;
+    loot.AddItem(bonusItem);
 
     if (_debug)
         LOG_INFO("module",
                  "mod-terror-zones: gathering yield bump zone={} store={} "
-                 "flavor={} tier={} item={} maxcount from={} to={} "
+                 "flavor={} tier={} item={} base_maxcount={} bonus={} "
                  "(x{:.3f} source={})",
                  zoneId, storeName,
                  FlavorDisplayName(slot.flavor),
                  TierDisplayName(slot.tier),
-                 item->itemid,
-                 before, static_cast<uint32>(item->maxcount),
+                 item->itemid, before, bonus,
                  yieldMult, source);
     return true;
 }

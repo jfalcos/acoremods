@@ -758,11 +758,16 @@ public:
     void RestoreAtmosphere(uint32 zoneId);
 
     // Prospector's gathering-yield overlay. Runs inside OnBeforeDropAddItem
-    // next to TryTierBump. Mutates `item->maxcount` when the active flavor
-    // is Prospector's AND the store is a gathering store AND the yield
-    // roll fires. Returns true on mutation for debug logging.
-    bool TryGatheringYieldBump(Player const* player, LootStoreItem* item,
-                               char const* storeName);
+    // next to TryTierBump. When the active flavor is Prospector's AND the
+    // store is a gathering store AND the yield roll fires, adds a bonus
+    // stack of `item`'s itemid directly to `loot` for this roll only --
+    // never mutates `item` itself, which is a pointer into the *shared,
+    // process-lifetime* LootTemplate::Entries list (mutating it there used
+    // to permanently and cumulatively inflate the template's maxcount for
+    // every future roll, in every zone, regardless of empowerment state).
+    // Returns true when a bonus was added, for debug logging.
+    bool TryGatheringYieldBump(Player const* player, Loot& loot,
+                               LootStoreItem* item, char const* storeName);
 
     // Per-bundle unique-drop roll. Fires at most once per Loot* bundle
     // regardless of how many times OnBeforeDropAddItem fires for that
