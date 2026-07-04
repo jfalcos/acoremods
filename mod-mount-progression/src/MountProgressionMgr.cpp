@@ -40,6 +40,31 @@ namespace
         if (s == "arcane")     return MountType::Arcane;
         return MountType::Stamina;
     }
+
+    // The starter quest is granted via Player::AddQuest with no live
+    // questgiver, so QuestSortID (the quest-log group header) can't fall
+    // back to a questgiver's position -- it needs a real zone ID, and one
+    // quest ID can only carry one QuestSortID. Rather than mislabel every
+    // non-Human race under Northshire Abbey's header, each starting zone
+    // gets its own quest_template row (900000 + offset below), same text,
+    // correct QuestSortID for that zone. Offsets are fixed to the 8
+    // starting-zone rows shipped in this module's SQL, not admin-configurable.
+    uint32 StarterQuestOffsetForRace(uint8 race)
+    {
+        switch (race)
+        {
+            case RACE_ORC:           return 1; // Valley of Trials
+            case RACE_TROLL:         return 1; // Valley of Trials (shared with Orc)
+            case RACE_DWARF:         return 2; // Coldridge Valley
+            case RACE_GNOME:         return 2; // Coldridge Valley (shared with Dwarf)
+            case RACE_NIGHTELF:      return 3; // Shadowglen
+            case RACE_UNDEAD_PLAYER: return 4; // Tirisfal Glades
+            case RACE_TAUREN:        return 5; // Mulgore
+            case RACE_BLOODELF:      return 6; // Sunstrider Isle
+            case RACE_DRAENEI:       return 7; // Azuremyst Isle
+            default:                 return 0; // RACE_HUMAN, and fallback for any other/future race
+        }
+    }
 }
 
 char const* RarityName(MountRarity r)
@@ -1059,7 +1084,8 @@ void MountProgressionMgr::MaybeSendStarterQuest(Player* player)
     if (already)
         return;
 
-    Quest const* quest = sObjectMgr->GetQuestTemplate(_starterQuestId);
+    uint32 questId = _starterQuestId + StarterQuestOffsetForRace(player->getRace());
+    Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
     if (quest)
     {
         player->AddQuest(quest, nullptr);
@@ -1095,7 +1121,7 @@ void MountProgressionMgr::MaybeSendStarterQuest(Player* player)
     if (_debug)
         LOG_INFO("module",
                  "mod-mount-progression: guid {} sent starter mail+quest (quest={})",
-                 guidLow, _starterQuestId);
+                 guidLow, questId);
 }
 
 void MountProgressionMgr::CompleteStarterQuest(Player* player)
@@ -1103,21 +1129,22 @@ void MountProgressionMgr::CompleteStarterQuest(Player* player)
     if (!_enabled || !_starterQuestEnabled || !player)
         return;
 
-    uint16 slot = player->FindQuestSlot(_starterQuestId);
+    uint32 questId = _starterQuestId + StarterQuestOffsetForRace(player->getRace());
+    uint16 slot = player->FindQuestSlot(questId);
     if (slot >= MAX_QUEST_LOG_SIZE)
         return;
 
-    Quest const* quest = sObjectMgr->GetQuestTemplate(_starterQuestId);
+    Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
     if (!quest)
         return;
 
-    player->CompleteQuest(_starterQuestId);
+    player->CompleteQuest(questId);
     player->RewardQuest(quest, 0, player);
 
     if (_debug)
         LOG_INFO("module",
                  "mod-mount-progression: guid {} completed starter quest {}",
-                 player->GetGUID().GetCounter(), _starterQuestId);
+                 player->GetGUID().GetCounter(), questId);
 }
 
 }  // namespace mod_mount_progression
