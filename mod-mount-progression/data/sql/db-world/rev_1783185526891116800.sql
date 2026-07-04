@@ -1,0 +1,21 @@
+-- ============================================================
+-- Mount Progression — starter quest QuestSortID fix.
+-- ============================================================
+-- The "Choose Your Companion" quest (900000) is granted directly via
+-- Player::AddQuest with no live questgiver object -- unlike a normal
+-- quest, the client has no NPC/GO to derive a quest-log group header
+-- from. Combined with QuestSortID left at its default (0), the client
+-- showed the literal debug placeholder "Missing Header! (Quest
+-- designers...)" as the group header, and the Details/Objectives pane
+-- stayed blank.
+--
+-- Fix: QuestSortID = -22, the same "no specific zone" category
+-- Blizzard uses for other quests whose single ID is granted across
+-- many different locations (Hallow's End's "Candy Bucket", Midsummer's
+-- "Honor the Flame", Winter Veil's "Gift Giving") -- exactly this
+-- quest's situation, since it's granted at 8 different starting zones
+-- via the same row. Confirmed -22 is the single most common
+-- QuestSortID value in quest_template (377 rows) before picking it.
+-- ============================================================
+
+UPDATE `quest_template` SET `QuestSortID` = -22 WHERE `ID` = 900000;
