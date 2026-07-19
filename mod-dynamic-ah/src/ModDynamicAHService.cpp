@@ -52,6 +52,10 @@ namespace
             out = Family::Ink;
         else if (s == "pigment")
             out = Family::Pigment;
+        else if (s == "engineering")
+            out = Family::Engineering;
+        else if (s == "rareraw")
+            out = Family::RareRaw;
         else if (s == "other")
             out = Family::Other;
         else
@@ -119,12 +123,15 @@ namespace
             c.stacksLow = s.stacksLow;
             c.stacksMid = s.stacksMid;
             c.stacksHigh = s.stacksHigh;
+            c.maxStacksPerItemPerCycle = s.maxStacksPerItemPerCycle;
 
             // context
             c.contextEnabled = s.contextEnabled;
             c.contextMaxPerBracket = s.contextMaxPerBracket;
             c.contextWeightBoost = s.contextWeightBoost;
             c.contextSkipVendor = s.contextSkipVendor;
+            c.activityWindowDays = s.contextActivityWindowDays;
+            c.botAccountPrefix = s.contextBotAccountPrefix;
 
             // random selection
             c.blockTrashAndCommon = s.blockTrashAndCommon;
@@ -165,7 +172,7 @@ void Service::OnConfigLoad()
     g.enableSeller = sConfigMgr->GetOption<bool>(CFG_ENABLE_SELLER, true);
     g.dryRun = sConfigMgr->GetOption<bool>(CFG_DRYRUN, true);
     g.intervalMin = sConfigMgr->GetOption<uint32_t>(CFG_INTERVAL_MIN, 600);
-    g.maxRandomPerCycle = sConfigMgr->GetOption<uint32_t>(CFG_MAX_RANDOM, 50);
+    g.maxRandomPerCycle = sConfigMgr->GetOption<uint32_t>(CFG_MAX_RANDOM, 70);
     g.minPriceCopper = sConfigMgr->GetOption<uint32_t>(CFG_MIN_PRICE, 10000);
     g.blockTrashAndCommon = sConfigMgr->GetOption<bool>(CFG_BLOCK_TRASH, true);
     g.allowQuality[0] = sConfigMgr->GetOption<bool>(CFG_ALLOW_Q_POOR, false);
@@ -191,6 +198,8 @@ void Service::OnConfigLoad()
     g.contextMaxPerBracket = sConfigMgr->GetOption<uint32_t>(CFG_CONTEXT_MAX_PER_BRACKET, 4u);
     g.contextWeightBoost = sConfigMgr->GetOption<float>(CFG_CONTEXT_WEIGHT_BOOST, 1.5f);
     g.contextSkipVendor = sConfigMgr->GetOption<bool>(CFG_CONTEXT_VENDOR_SKIP, true);
+    g.contextActivityWindowDays = sConfigMgr->GetOption<uint32_t>(CFG_CONTEXT_ACTIVITY_WINDOW_DAYS, 7u);
+    g.contextBotAccountPrefix = sConfigMgr->GetOption<std::string>(CFG_CONTEXT_BOT_ACCOUNT_PREFIX, "rndbot");
 
     g.scarcityEnabled = sConfigMgr->GetOption<bool>(CFG_SCARCITY_ENABLED, true);
     g.scarcityPriceBoostMax = sConfigMgr->GetOption<float>(CFG_SCARCITY_PRICE_BOOST_MAX, 0.30f);
@@ -215,42 +224,53 @@ void Service::OnConfigLoad()
     g.stInk = sConfigMgr->GetOption<uint32_t>(CFG_STACK_INK, 10u);
     g.stPigment = sConfigMgr->GetOption<uint32_t>(CFG_STACK_PIGMENT, 20u);
     g.stFish = sConfigMgr->GetOption<uint32_t>(CFG_STACK_FISH, 20u);
-    g.stacksLow = sConfigMgr->GetOption<uint32_t>(CFG_STACKS_LOW, 2u);
-    g.stacksMid = sConfigMgr->GetOption<uint32_t>(CFG_STACKS_MID, 3u);
-    g.stacksHigh = sConfigMgr->GetOption<uint32_t>(CFG_STACKS_HIGH, 2u);
+    g.stacksLow = sConfigMgr->GetOption<uint32_t>(CFG_STACKS_LOW, 3u);
+    g.stacksMid = sConfigMgr->GetOption<uint32_t>(CFG_STACKS_MID, 5u);
+    g.stacksHigh = sConfigMgr->GetOption<uint32_t>(CFG_STACKS_HIGH, 3u);
+    g.maxStacksPerItemPerCycle = sConfigMgr->GetOption<uint32_t>(CFG_MAX_STACKS_PER_ITEM, 8u);
 
     g.debugContextLogs = sConfigMgr->GetOption<bool>(CFG_DEBUG_CONTEXT_LOGS, false);
     g.loopEnabled = sConfigMgr->GetOption<bool>(CFG_LOOP_ENABLED, true);
 
     g.caps.InitDefaults();
     g.caps.enabled = sConfigMgr->GetOption<bool>(CFG_CAP_ENABLED, true);
-    g.caps.totalPerCycleLimit = sConfigMgr->GetOption<uint32_t>(CFG_CAP_TOTAL, 150u);
-    g.caps.perHouseLimit[0] = sConfigMgr->GetOption<uint32_t>(CFG_CAP_HOUSE_ALLI, 80u);
-    g.caps.perHouseLimit[1] = sConfigMgr->GetOption<uint32_t>(CFG_CAP_HOUSE_HORDE, 80u);
-    g.caps.perHouseLimit[2] = sConfigMgr->GetOption<uint32_t>(CFG_CAP_HOUSE_NEUT, 120u);
+    // Sized with headroom above the sum of per-family caps below, so the shared total/house
+    // pool essentially never binds first — capPerFamily is the real per-category governor.
+    g.caps.totalPerCycleLimit = sConfigMgr->GetOption<uint32_t>(CFG_CAP_TOTAL, 4000u);
+    g.caps.perHouseLimit[0] = sConfigMgr->GetOption<uint32_t>(CFG_CAP_HOUSE_ALLI, 1800u);
+    g.caps.perHouseLimit[1] = sConfigMgr->GetOption<uint32_t>(CFG_CAP_HOUSE_HORDE, 1800u);
+    g.caps.perHouseLimit[2] = sConfigMgr->GetOption<uint32_t>(CFG_CAP_HOUSE_NEUT, 1200u);
 
     auto FAM = [](char const *n)
     { return std::string(CFG_CAP_FAMILY_PREFIX) + n; };
     auto loadFam = [&](Family f, char const *key, uint32_t def)
     { g.caps.familyLimit[(size_t)f] = sConfigMgr->GetOption<uint32_t>(key, def); };
-    loadFam(Family::Herb, FAM("Herb").c_str(), 60u);
-    loadFam(Family::Ore, FAM("Ore").c_str(), 50u);
-    loadFam(Family::Bar, FAM("Bar").c_str(), 50u);
-    loadFam(Family::Cloth, FAM("Cloth").c_str(), 60u);
-    loadFam(Family::Leather, FAM("Leather").c_str(), 40u);
-    loadFam(Family::Dust, FAM("Dust").c_str(), 40u);
-    loadFam(Family::Essence, FAM("Essence").c_str(), 40u);
-    loadFam(Family::Shard, FAM("Shard").c_str(), 40u);
-    loadFam(Family::Stone, FAM("Stone").c_str(), 40u);
-    loadFam(Family::Meat, FAM("Meat").c_str(), 20u);
-    loadFam(Family::Fish, FAM("Fish").c_str(), 20u);
-    loadFam(Family::Gem, FAM("Gem").c_str(), 30u);
-    loadFam(Family::Bandage, FAM("Bandage").c_str(), 10u);
-    loadFam(Family::Potion, FAM("Potion").c_str(), 20u);
-    loadFam(Family::Ink, FAM("Ink").c_str(), 20u);
-    loadFam(Family::Pigment, FAM("Pigment").c_str(), 20u);
-    loadFam(Family::Elemental, FAM("Elemental").c_str(), 30u);
-    loadFam(Family::Other, FAM("Other").c_str(), 80u);
+    // Roughly doubled from the first pass: the recipe-driven completeness sweep (DynamicAHRecipes
+    // RecipeUsageIndex) surfaces far more distinct items per family than the curated tables alone
+    // (e.g. a dozen+ Northrend fish beyond FISHING_RAW's hand-picked two per bracket), so a family
+    // cap sized for "curated table only" starves out everything the sweep adds once the curated
+    // items alone eat the budget — same failure mode as the earlier house-cap starvation bug, one
+    // level down.
+    loadFam(Family::Herb, FAM("Herb").c_str(), 280u);
+    loadFam(Family::Ore, FAM("Ore").c_str(), 240u);
+    loadFam(Family::Bar, FAM("Bar").c_str(), 240u);
+    loadFam(Family::Cloth, FAM("Cloth").c_str(), 280u);
+    loadFam(Family::Leather, FAM("Leather").c_str(), 200u);
+    loadFam(Family::Dust, FAM("Dust").c_str(), 180u);
+    loadFam(Family::Essence, FAM("Essence").c_str(), 180u);
+    loadFam(Family::Shard, FAM("Shard").c_str(), 180u);
+    loadFam(Family::Stone, FAM("Stone").c_str(), 180u);
+    loadFam(Family::Meat, FAM("Meat").c_str(), 150u);
+    loadFam(Family::Fish, FAM("Fish").c_str(), 150u);
+    loadFam(Family::Gem, FAM("Gem").c_str(), 140u);
+    loadFam(Family::Bandage, FAM("Bandage").c_str(), 50u);
+    loadFam(Family::Potion, FAM("Potion").c_str(), 100u);
+    loadFam(Family::Ink, FAM("Ink").c_str(), 100u);
+    loadFam(Family::Pigment, FAM("Pigment").c_str(), 100u);
+    loadFam(Family::Elemental, FAM("Elemental").c_str(), 140u);
+    loadFam(Family::Engineering, FAM("Engineering").c_str(), 180u);
+    loadFam(Family::RareRaw, FAM("RareRaw").c_str(), 80u);
+    loadFam(Family::Other, FAM("Other").c_str(), 300u);
 
     g.avgGoldPerQuest = sConfigMgr->GetOption<float>(CFG_ECON_GOLD_PER_QUEST, 10.0f);
     auto ECON = [](const char *fam)

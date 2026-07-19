@@ -6,6 +6,7 @@
 #include "SharedDefines.h"
 #include "ObjectMgr.h"
 #include "Log.h"
+#include <unordered_set>
 
 using namespace ModDynamicAH;
 
@@ -68,6 +69,23 @@ uint16_t RecipeUsageIndex::EffectiveSkillForReagent(uint32_t itemId) const
     return uint16_t(eff + 0.5);
 }
 
+uint8_t RecipeUsageIndex::BucketOf(uint16_t req)
+{
+    return (req < 75) ? 0 : (req < 150) ? 1
+                         : (req < 225)  ? 2
+                         : (req < 300)  ? 3
+                         : (req < 375)  ? 4
+                                        : 5;
+}
+
+std::vector<uint32_t> const &RecipeUsageIndex::ItemsForSkillLineAtSkill(uint32_t skillLineId, uint16_t skillValue) const
+{
+    static std::vector<uint32_t> const empty;
+    uint64_t key = (uint64_t(skillLineId) << 8) | uint64_t(BucketOf(skillValue));
+    auto it = _bySkillLineBucket.find(key);
+    return it != _bySkillLineBucket.end() ? it->second : empty;
+}
+
 void RecipeUsageIndex::Build()
 {
     if (_built)
@@ -79,6 +97,12 @@ void RecipeUsageIndex::Build()
     uint64_t reagentSlotsWithItem = 0;
     uint64_t linksChecked = 0;
     uint64_t profLinks = 0;
+
+    // itemId -> set of skill lines that use it as a reagent. Bucketing needs each item's FINAL
+    // minimum skill requirement across ALL its recipes, which isn't known until the full scan
+    // completes (spells aren't processed in skill order) — so buckets are assigned in a second
+    // pass below, not while scanning.
+    std::unordered_map<uint32_t, std::unordered_set<uint32_t>> itemSkillLines;
 
     for (uint32_t i = 0; i < sSpellStore.GetNumRows(); ++i)
     {
@@ -121,21 +145,37 @@ void RecipeUsageIndex::Build()
                             st.min = req;
                         if (req > st.max)
                             st.max = req;
-                        int bin = (req < 75) ? 0 : (req < 150) ? 1
-                                               : (req < 225)   ? 2
-                                               : (req < 300)   ? 3
-                                               : (req < 375)   ? 4
-                                                               : 5;
+                        int bin = BucketOf(req);
                         st.bins[bin]++;
+
+                        itemSkillLines[itemId].insert(sla->SkillLine);
                     }
                 }
             }
         }
     }
 
+    // Second pass: now that every item's FINAL minimum skill requirement is known, bucket by
+    // that minimum — the tier at which a leveling crafter would actually be shopping for it,
+    // matching how the hand-curated MatBracket tables assign tiers.
+    std::unordered_map<uint64_t, std::unordered_set<uint32_t>> byLineBucket;
+    for (auto const &kv : itemSkillLines)
+    {
+        uint32_t itemId = kv.first;
+        auto statIt = _stats.find(itemId);
+        if (statIt == _stats.end())
+            continue;
+        uint8_t bucket = BucketOf(statIt->second.min);
+        for (uint32_t skillLine : kv.second)
+            byLineBucket[(uint64_t(skillLine) << 8) | uint64_t(bucket)].insert(itemId);
+    }
+
+    for (auto const &kv : byLineBucket)
+        _bySkillLineBucket[kv.first].assign(kv.second.begin(), kv.second.end());
+
     _built = true;
 
     LOG_INFO("mod.dynamicah",
-             "recipes: built reagent index: spellsTotal={} spellsWithInfo={} reagentSlotsScanned={} reagentSlotsWithItem={} linksChecked={} profLinks={} uniqueReagents={}",
-             spellsTotal, spellsWithInfo, reagentSlotsScanned, reagentSlotsWithItem, linksChecked, profLinks, _stats.size());
+             "recipes: built reagent index: spellsTotal={} spellsWithInfo={} reagentSlotsScanned={} reagentSlotsWithItem={} linksChecked={} profLinks={} uniqueReagents={} skillLineBuckets={}",
+             spellsTotal, spellsWithInfo, reagentSlotsScanned, reagentSlotsWithItem, linksChecked, profLinks, _stats.size(), _bySkillLineBucket.size());
 }

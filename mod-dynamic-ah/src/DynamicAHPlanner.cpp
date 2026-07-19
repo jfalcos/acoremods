@@ -11,6 +11,8 @@
 #include <unordered_set>
 #include <set>
 #include "DynamicAHRecipes.h"
+#include "DynamicAHActivity.h"
+#include "Random.h"
 
 namespace ModDynamicAH
 {
@@ -148,8 +150,24 @@ namespace ModDynamicAH
         size_t f = (size_t)fam;
         if (_capsEnabled)
         {
-            if (_capTotal && _plTotal >= _capTotal)
+            // The global total cap is shared by every family, including Family::Other (regular,
+            // non-profession items posted by BuildRandomPlan). BuildContextPlan runs first each
+            // cycle and, on a busy server with many professioned players online, can legitimately
+            // post enough material auctions to exhaust _capTotal on its own — silently starving
+            // BuildRandomPlan of any budget even though Family::Other has its own untouched
+            // per-family cap. Reserve that family's slice of the global total so non-Other
+            // families can never fully crowd it out.
+            size_t other = (size_t)Family::Other;
+            if (f != other)
+            {
+                uint32 reserve = std::min(_capFamily[other], _capTotal);
+                if (_capTotal && _plTotal + reserve >= _capTotal)
+                    return false;
+            }
+            else if (_capTotal && _plTotal >= _capTotal)
+            {
                 return false;
+            }
             if (_capHouse[h] && _plHouse[h] >= _capHouse[h])
                 return false;
             if (_capFamily[f] && _plFamily[f] >= _capFamily[f])
@@ -357,6 +375,11 @@ namespace ModDynamicAH
         if (!IsAuctionableItem(tmpl))
             return false;
 
+        // Never compete with a reliable NPC vendor — if a player can just walk up and buy it for
+        // gold, it doesn't belong on the AH (e.g. Eternium Thread, common blasting powders).
+        if (DynamicAHVendor::IsReliableVendorItem(itemId))
+            return false;
+
         uint32 unitStart = 0, unitBuy = 0;
         self->PriceWithPolicies(cfg, fam, itemId, tmpl, house, unitStart, unitBuy);
 
@@ -378,13 +401,31 @@ namespace ModDynamicAH
                  "plan: item={} '{}' house={} stack={} unitStart={}c unitBuy={}c stackStart={}c stackBuy={}c",
                  itemId, tmpl->Name1, houseTag, count, unitStart, unitBuy, stackStart, stackBuy);
 
-        for (uint32 i = 0; i < stacksToPost; ++i)
+        // Top up toward a randomized 5-10 target LIVE stock for this item/house, not "post N more
+        // every time we're asked." Auctions last 24h but cycles (and, during testing, restarts)
+        // can happen more often than that, so blindly adding stacksToPost every time causes
+        // unbounded pileup — a chest of Wool Cloth from 5 different cycles all still live at
+        // once. ScarcityCount() reflects TRUE current live supply (rebuilt from the real
+        // `auctionhouse` table at the top of this cycle); _perTickPlanCap tracks what THIS cycle
+        // has already queued for the item (multiple call paths — e.g. Tailoring and First Aid
+        // both scanning cloth — can all reach this same item within one cycle, and the DB count
+        // alone wouldn't see those yet).
+        uint64 perItemKey = (uint64(HouseIndex(house)) << 32) | uint64(itemId);
+        uint32 &queuedThisCycle = self->_perTickPlanCap[perItemKey];
+        uint32 liveOrQueued = self->ScarcityCount(itemId, house) + queuedThisCycle;
+        uint32 target = urand(5, 10);
+        uint32 wanted = (target > liveOrQueued) ? (target - liveOrQueued) : 0;
+        uint32 toPost = std::min({wanted, stacksToPost, cfg.maxStacksPerItemPerCycle});
+
+        uint32 posted = 0;
+        for (; posted < toPost; ++posted)
         {
             if (!self->TryPlanOnce(house, fam))
                 break;
             self->Queue().Push(PostRequest{house, itemId, count, stackStart, stackBuy, 24 * HOUR});
+            ++queuedThisCycle;
         }
-        return true;
+        return posted > 0;
     }
 
     void DynamicAHPlanner::BuildContextPlan(PlannerConfig const &cfg)
@@ -398,29 +439,26 @@ namespace ModDynamicAH
 
         const uint32 stacks = cfg.stacksMid;
 
-        // For each profession's material table, find which skill brackets the online players
-        // actually sit in (per faction) and list only those tiers. De-duping by bracket means a
-        // crowded server lists each needed tier once per faction house rather than once per player,
-        // so listings track the population's real level progression without flooding the AH.
+        // Rebuild the "who's actually playing" snapshot for this cycle: real characters active
+        // in the last cfg.activityWindowDays days (or online right now), excluding playerbots.
+        // Sourcing from ObjectAccessor::GetPlayers() alone would track whichever playerbots
+        // happen to be logged in instead of the real playerbase.
+        DynamicAHActivity::Instance().Refresh(cfg.activityWindowDays, cfg.botAccountPrefix);
+
+        // For each profession's material table, find which skill brackets the active real
+        // players actually sit in (per faction) and list only those tiers. De-duping by bracket
+        // means a crowded server lists each needed tier once per faction house rather than once
+        // per player, so listings track the population's real level progression without
+        // flooding the AH.
         auto processTable = [&](uint32 skillId, Family fam, auto const &tab, uint32 stack) -> bool
         {
             std::set<MatBracket const *> needAlliance, needHorde;
-            for (auto const &kv : ObjectAccessor::GetPlayers())
-            {
-                Player *p = kv.second;
-                if (!p || !p->IsInWorld())
-                    continue;
-                uint16 sv = p->GetSkillValue(skillId);
-                if (!sv)
-                    continue;
+            for (uint16 sv : DynamicAHActivity::Instance().SkillValues(skillId, TEAM_ALLIANCE))
                 if (MatBracket const *b = FindBracket(sv, tab))
-                {
-                    if (p->GetTeamId() == TEAM_ALLIANCE)
-                        needAlliance.insert(b);
-                    else
-                        needHorde.insert(b);
-                }
-            }
+                    needAlliance.insert(b);
+            for (uint16 sv : DynamicAHActivity::Instance().SkillValues(skillId, TEAM_HORDE))
+                if (MatBracket const *b = FindBracket(sv, tab))
+                    needHorde.insert(b);
 
             bool any = false;
             for (MatBracket const *b : needAlliance)
@@ -455,14 +493,76 @@ namespace ModDynamicAH
         any |= processTable(SKILL_ENCHANTING, Family::Shard, ENCH_SHARDS, 1u); // shards/crystals sell singly
         // Jewelcrafting — gems sell as singles, not stacks
         any |= processTable(SKILL_JEWELCRAFTING, Family::Gem, JEWELCRAFT_GEMS, 1u);
-        // Alchemy reagents (primals / crystallized / eternals)
+        // Alchemy reagents (primals / crystallized / eternals) + finished potions
         any |= processTable(SKILL_ALCHEMY, Family::Elemental, ELEMENTALS, cfg.stDefault);
+        any |= processTable(SKILL_ALCHEMY, Family::Potion, POTIONS, cfg.stPotion);
         // Cooking / fishing
         any |= processTable(SKILL_COOKING, Family::Meat, COOKING_MEAT, cfg.stMeat);
         any |= processTable(SKILL_FISHING, Family::Fish, FISHING_RAW, cfg.stFish);
+        // First Aid finished bandages
+        any |= processTable(SKILL_FIRST_AID, Family::Bandage, BANDAGES, cfg.stBandage);
+        // Engineering (blasting powders, bolts, build parts)
+        any |= processTable(SKILL_ENGINEERING, Family::Engineering, ENGINEERING_POWDER, cfg.stDefault);
+        any |= processTable(SKILL_ENGINEERING, Family::Engineering, ENGINEERING_BOLTS, cfg.stDefault);
+        any |= processTable(SKILL_ENGINEERING, Family::Engineering, ENGINEERING_PARTS, cfg.stDefault);
+        // Rare/special cross-profession BoE mats: posted once any of the professions that
+        // consume them (Blacksmithing, Leatherworking, Enchanting, Engineering) is at tier.
+        any |= processTable(SKILL_BLACKSMITHING, Family::RareRaw, RARE_RAW, cfg.stDefault);
+        any |= processTable(SKILL_LEATHERWORKING, Family::RareRaw, RARE_RAW, cfg.stDefault);
+        any |= processTable(SKILL_ENCHANTING, Family::RareRaw, RARE_RAW, cfg.stDefault);
+        any |= processTable(SKILL_ENGINEERING, Family::RareRaw, RARE_RAW, cfg.stDefault);
 
-        // Fallback: no professioned players online — keep the AH from going empty by listing a
-        // light baseline of the core gathering families to both factions (still cap-bounded).
+        // Supplemental data-driven sweep: augments the curated tables above with EVERY reagent
+        // any live recipe in these skill lines actually uses (RecipeUsageIndex, built from real
+        // spell/skill-line data — see DynamicAHRecipes.h). This closes gaps the hand-curated
+        // tables inevitably miss or fall behind on (e.g. a missing ore tier) and self-heals as
+        // recipes change, instead of needing another manual table edit. Lower stack count than
+        // the curated sweeps above (stacksLow) since this is a completeness net, not the primary
+        // volume source.
+        {
+            struct SkillFamily
+            {
+                uint32 skill;
+                Family fam;
+            };
+            static const SkillFamily kRecipeDrivenSkills[] = {
+                {SKILL_TAILORING, Family::Cloth}, {SKILL_FIRST_AID, Family::Cloth},
+                {SKILL_ALCHEMY, Family::Herb}, {SKILL_HERBALISM, Family::Herb},
+                {SKILL_INSCRIPTION, Family::Pigment},
+                {SKILL_MINING, Family::Ore}, {SKILL_BLACKSMITHING, Family::Bar},
+                {SKILL_LEATHERWORKING, Family::Leather}, {SKILL_SKINNING, Family::Leather},
+                {SKILL_ENCHANTING, Family::Dust}, {SKILL_JEWELCRAFTING, Family::Gem},
+                {SKILL_COOKING, Family::Meat}, {SKILL_FISHING, Family::Fish},
+                {SKILL_ENGINEERING, Family::Engineering},
+            };
+
+            ModDynamicAH::RecipeUsageIndex::Instance().EnsureBuilt();
+            for (auto const &sf : kRecipeDrivenSkills)
+            {
+                auto sweepTeam = [&](AuctionHouseId house, TeamId team)
+                {
+                    std::set<uint32> posted;
+                    for (uint16 sv : DynamicAHActivity::Instance().SkillValues(sf.skill, team))
+                    {
+                        for (uint32 itemId : ModDynamicAH::RecipeUsageIndex::Instance().ItemsForSkillLineAtSkill(sf.skill, sv))
+                        {
+                            if (!posted.insert(itemId).second)
+                                continue;
+                            ItemTemplate const *tmpl = sObjectMgr->GetItemTemplate(itemId);
+                            if (!tmpl || !IsAuctionableItem(tmpl))
+                                continue;
+                            any |= EnqueueHouse(house, cfg, this, sf.fam, itemId, cfg.stDefault, cfg.stacksLow);
+                        }
+                    }
+                };
+                sweepTeam(AuctionHouseId::Alliance, TEAM_ALLIANCE);
+                sweepTeam(AuctionHouseId::Horde, TEAM_HORDE);
+            }
+        }
+
+        // Fallback: no active real players with matching professions — keep the AH from going
+        // empty by listing a light baseline of the core families to both factions (still
+        // cap-bounded).
         if (!any)
         {
             auto dumpAll = [&](Family fam, auto const &tab, uint32 stack)
@@ -481,6 +581,8 @@ namespace ModDynamicAH
             dumpAll(Family::Leather, LEATHERS, cfg.stLeather);
             dumpAll(Family::Dust, ENCH_DUSTS, cfg.stDust);
             dumpAll(Family::Gem, JEWELCRAFT_GEMS, 1u);
+            dumpAll(Family::Bandage, BANDAGES, cfg.stBandage);
+            dumpAll(Family::Engineering, ENGINEERING_POWDER, cfg.stDefault);
         }
     }
 

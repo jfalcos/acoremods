@@ -15,7 +15,7 @@ namespace ModDynamicAH
         bool enableSeller = true;
         bool dryRun = true;
         uint32_t intervalMin = 30;
-        uint32_t maxRandomPerCycle = 50;
+        uint32_t maxRandomPerCycle = 70;
         bool loopEnabled = true;
 
         // pricing & selection filters
@@ -34,6 +34,8 @@ namespace ModDynamicAH
         uint32_t contextMaxPerBracket = 4;
         float contextWeightBoost = 1.5f;
         bool contextSkipVendor = true;
+        uint32_t contextActivityWindowDays = 7;
+        std::string contextBotAccountPrefix = "rndbot";
 
         // scarcity
         bool scarcityEnabled = true;
@@ -48,7 +50,8 @@ namespace ModDynamicAH
         // stacks & categories
         uint32_t stDefault = 20;
         uint32_t stCloth = 20, stOre = 20, stBar = 20, stHerb = 20, stLeather = 20, stDust = 20, stGem = 20, stStone = 20, stMeat = 20, stBandage = 20, stPotion = 5, stInk = 10, stPigment = 20, stFish = 20;
-        uint32_t stacksLow = 2, stacksMid = 3, stacksHigh = 2;
+        uint32_t stacksLow = 3, stacksMid = 5, stacksHigh = 3;
+        uint32_t maxStacksPerItemPerCycle = 8;
 
         // multipliers for pricing
         float mulDust = 1.0f, mulEssence = 1.25f, mulShard = 2.0f, mulRareRaw = 3.0f;
@@ -82,9 +85,9 @@ namespace ModDynamicAH
         struct Caps
         {
             bool enabled = true;
-            uint32_t totalPerCycleLimit = 150;
+            uint32_t totalPerCycleLimit = 4000;
 
-            uint32_t perHouseLimit[3] = {80, 80, 120};
+            uint32_t perHouseLimit[3] = {1800, 1800, 1200};
             uint32_t perHousePlanned[3] = {0, 0, 0};
 
             uint32_t familyLimit[(size_t)Family::COUNT] = {0};

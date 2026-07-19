@@ -38,13 +38,20 @@ namespace ModDynamicAH
 
         // stacks
         uint32 stDefault = 20, stCloth = 20, stOre = 20, stBar = 20, stHerb = 20, stLeather = 20, stDust = 20, stGem = 20, stStone = 20, stMeat = 20, stBandage = 20, stPotion = 5, stInk = 10, stPigment = 20, stFish = 20;
-        uint32 stacksLow = 2, stacksMid = 3, stacksHigh = 2;
+        uint32 stacksLow = 3, stacksMid = 5, stacksHigh = 3;
+        // Hard ceiling on separate auctions of the SAME item/house per cycle, shared across every
+        // call path that might enqueue that item (curated tables, the recipe-driven sweep, etc).
+        uint32 maxStacksPerItemPerCycle = 8;
 
         // context planner
         bool contextEnabled = true;
         uint32 contextMaxPerBracket = 4;
         double contextWeightBoost = 1.5;
         bool contextSkipVendor = true;
+        // Skill brackets are sourced from real characters active in the last N days (plus anyone
+        // online now), not just whoever's currently logged in — see DynamicAHActivity.
+        uint32 activityWindowDays = 7;
+        std::string botAccountPrefix = "rndbot";
 
         // random selection
         bool blockTrashAndCommon = true;
@@ -56,10 +63,15 @@ namespace ModDynamicAH
         double avgGoldPerQuest = 10.0;
         uint32 questsPerFamily[(size_t)Family::COUNT] = {0};
 
-        // caps (hard ceilings on auctions queued per cycle; 0 = unlimited for that bucket)
+        // caps (hard ceilings on auctions queued per cycle; 0 = unlimited for that bucket).
+        // capPerFamily is the real per-category governor (tuned per family below); capTotal/
+        // capPerHouse exist as an anti-flood backstop and are sized with headroom above the sum
+        // of realistic simultaneous per-family demand so they don't starve out families that are
+        // processed later in the same cycle (BuildContextPlan processes families in a fixed
+        // order — a house cap tighter than total demand silently favors early families).
         bool capsEnabled = true;
-        uint32 capTotalPerCycle = 150;
-        uint32 capPerHouse[3] = {80, 80, 120};         // [Alliance, Horde, Neutral]
+        uint32 capTotalPerCycle = 4000;
+        uint32 capPerHouse[3] = {1800, 1800, 1200};    // [Alliance, Horde, Neutral]
         uint32 capPerFamily[(size_t)Family::COUNT] = {0};
     };
 

@@ -47,7 +47,7 @@ static const std::array<MatBracket, 9> MINING_ORE = {{
     {175, 230, {3858 /* Mithril Ore */, 7911 /* Truesilver Ore */}},
     {230, 300, {10620 /* Thorium Ore */}},
     {300, 325, {23424 /* Fel Iron Ore */}},
-    {325, 350, {23425 /* Adamantite Ore */}},
+    {325, 350, {23425 /* Adamantite Ore */, 23426 /* Khorium Ore */}},
     {350, 395, {36909 /* Cobalt Ore */}},
     {395, 450, {36912 /* Saronite Ore */, 36910 /* Titanium Ore */}},
 }};
@@ -61,7 +61,7 @@ static const std::array<MatBracket, 10> BS_BARS = {{
     {200, 250, {3860 /* Mithril Bar */}},
     {250, 300, {12359 /* Thorium Bar */}},
     {300, 325, {23445 /* Fel Iron Bar */}},
-    {325, 350, {23446 /* Adamantite Bar */}},
+    {325, 350, {23446 /* Adamantite Bar */, 23449 /* Khorium Bar */}},
     {350, 420, {36916 /* Cobalt Bar */}},
     {420, 450, {36913 /* Saronite Bar */}},
 }};
@@ -118,7 +118,7 @@ static const std::array<MatBracket, 8> FISHING_RAW = {{
     {300, 325, {27422 /* Barbed Gill Trout */, 27425 /* Spotted Feltail */}},
     {325, 350, {27429 /* Zangarian Sporefish */, 27437 /* Icefin Bluefish */}},
     {350, 400, {41809 /* Glacial Salmon */, 41802 /* Imperial Manta Ray */}},
-    {400, 450, {41808 /* Bonescale Snapper */, 53063 /* Mountain Trout */}},
+    {400, 450, {41808 /* Bonescale Snapper */, 41806 /* Musselback Sculpin */}},
 }};
 
 // -------------------------------- JC prospect gems
@@ -164,12 +164,63 @@ static const std::array<MatBracket, 3> ELEMENTALS = {{
     {425, 450, {35622 /* Eternal Water */, 35623 /* Eternal Air */, 35624 /* Eternal Earth */, 35625 /* Eternal Life */, 35627 /* Eternal Shadow */, 36860 /* Eternal Fire */}},
 }};
 
-// -------------------------------- Rare raws / special mats
+// -------------------------------- Rare raws / special mats (cross-profession BoE crafting mats;
+// posted whenever any of the professions that consume them — Blacksmithing, Leatherworking,
+// Enchanting, Engineering — is at a matching skill tier. Borean Leather is intentionally NOT
+// repeated here; it's already covered by LEATHERS/SKILL_LEATHERWORKING+SKINNING.)
 static const std::array<MatBracket, 4> RARE_RAW = {{
     {250, 310, {12655 /* Enchanted Thorium Bar */}},
     {330, 375, {23571 /* Primal Might */, 25707 /* Fel Hide */}},
-    {375, 450, {33568 /* Borean Leather */, 43007 /* Northern Spices */, 45087 /* Runed Orb */}},
+    {375, 450, {43007 /* Northern Spices */, 45087 /* Runed Orb */}},
     {430, 450, {47556 /* Crusader Orb */}},
+}};
+
+// -------------------------------- Engineering: blasting powders (Stone -> Powder chain)
+static const std::array<MatBracket, 5> ENGINEERING_POWDER = {{
+    {1, 75, {4357 /* Rough Blasting Powder */}},
+    {75, 150, {4364 /* Coarse Blasting Powder */}},
+    {150, 200, {4377 /* Heavy Blasting Powder */}},
+    {200, 300, {10505 /* Solid Blasting Powder */}},
+    {300, 450, {15992 /* Dense Blasting Powder */}},
+}};
+
+// -------------------------------- Engineering: bolts (Ore/Bar -> Bolt chain)
+static const std::array<MatBracket, 2> ENGINEERING_BOLTS = {{
+    {1, 300, {4359 /* Handful of Copper Bolts */}},
+    {300, 450, {39681 /* Handful of Cobalt Bolts */}},
+}};
+
+// -------------------------------- Engineering: misc build parts.
+// Wooden Stock / Heavy Stock deliberately excluded — both are sold unlimited-stock for gold by
+// >100 vendors each (verified live), so they're vendor trash, not AH-worthy.
+static const std::array<MatBracket, 2> ENGINEERING_PARTS = {{
+    {1, 300, {7191 /* Fused Wiring */}},
+    {300, 450, {39690 /* Volatile Blasting Trigger */}},
+}};
+
+// -------------------------------- First Aid bandages (finished good, cloth chain)
+static const std::array<MatBracket, 7> BANDAGES = {{
+    {1, 75, {1251 /* Linen Bandage */, 2581 /* Heavy Linen Bandage */}},
+    {75, 125, {3530 /* Wool Bandage */, 3531 /* Heavy Wool Bandage */}},
+    {125, 175, {6450 /* Silk Bandage */, 6451 /* Heavy Silk Bandage */}},
+    {175, 225, {8544 /* Mageweave Bandage */, 8545 /* Heavy Mageweave Bandage */}},
+    {225, 300, {14529 /* Runecloth Bandage */, 14530 /* Heavy Runecloth Bandage */}},
+    {300, 350, {21990 /* Netherweave Bandage */, 21991 /* Heavy Netherweave Bandage */}},
+    {350, 450, {34721 /* Frostweave Bandage */, 34722 /* Heavy Frostweave Bandage */}},
+}};
+
+// -------------------------------- Alchemy healing potions (finished good, herb chain).
+// Skill brackets are approximate (recipe skill requirements are not exposed per-item here);
+// tune to your economy like the other approximate tables in this file.
+static const std::array<MatBracket, 8> POTIONS = {{
+    {1, 70, {118 /* Minor Healing Potion */}},
+    {70, 115, {858 /* Lesser Healing Potion */}},
+    {115, 165, {929 /* Healing Potion */}},
+    {165, 205, {1710 /* Greater Healing Potion */}},
+    {205, 270, {3928 /* Superior Healing Potion */}},
+    {270, 330, {13446 /* Major Healing Potion */}},
+    {330, 400, {33447 /* Runic Healing Potion */}},
+    {400, 450, {40087 /* Powerful Rejuvenation Potion */}},
 }};
 
 // -------------------------------- Inscription pigments (milled from herbs)

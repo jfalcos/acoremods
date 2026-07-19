@@ -5,6 +5,7 @@
 #include "GameTime.h"
 #include "QueryResult.h"
 #include "Field.h"
+#include "DynamicAHVendor.h"
 
 namespace ModDynamicAH
 {
@@ -35,6 +36,10 @@ namespace ModDynamicAH
 
                 // Never list items a player could not auction (BoP, quest, account-bound, etc.).
                 if (!IsAuctionableItem(t))
+                    continue;
+
+                // Never compete with a reliable NPC vendor.
+                if (DynamicAHVendor::IsReliableVendorItem(id))
                     continue;
 
                 if (cfg.blockTrashAndCommon && (q <= 1) && cfg.whitelist.find(id) == cfg.whitelist.end())

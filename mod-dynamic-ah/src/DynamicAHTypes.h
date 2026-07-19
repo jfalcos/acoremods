@@ -36,6 +36,8 @@ namespace ModDynamicAH
         Potion,
         Ink,
         Pigment,
+        Engineering,
+        RareRaw,
         Other,
         COUNT
     };
@@ -78,6 +80,10 @@ namespace ModDynamicAH
             return "ink";
         case Family::Pigment:
             return "pigment";
+        case Family::Engineering:
+            return "engineering";
+        case Family::RareRaw:
+            return "rareraw";
         default:
             return "other";
         }
@@ -161,6 +167,8 @@ namespace ModDynamicAH
     inline constexpr char const *CFG_CONTEXT_MAX_PER_BRACKET = "ModDynamicAH.Context.MaxPerBracket";
     inline constexpr char const *CFG_CONTEXT_WEIGHT_BOOST = "ModDynamicAH.Context.WeightBoost";
     inline constexpr char const *CFG_CONTEXT_VENDOR_SKIP = "ModDynamicAH.Context.SkipVendor";
+    inline constexpr char const *CFG_CONTEXT_ACTIVITY_WINDOW_DAYS = "ModDynamicAH.Context.ActivityWindowDays";
+    inline constexpr char const *CFG_CONTEXT_BOT_ACCOUNT_PREFIX = "ModDynamicAH.Context.BotAccountPrefix";
     inline constexpr char const *CFG_SCARCITY_ENABLED = "ModDynamicAH.Scarcity.Enabled";
     inline constexpr char const *CFG_SCARCITY_PRICE_BOOST_MAX = "ModDynamicAH.Scarcity.PriceBoostMax";
     inline constexpr char const *CFG_SCARCITY_PER_TICK_ITEM_CAP = "ModDynamicAH.Scarcity.PerItemCap";
@@ -186,6 +194,7 @@ namespace ModDynamicAH
     inline constexpr char const *CFG_STACKS_LOW = "ModDynamicAH.Stacks.Low";
     inline constexpr char const *CFG_STACKS_MID = "ModDynamicAH.Stacks.Mid";
     inline constexpr char const *CFG_STACKS_HIGH = "ModDynamicAH.Stacks.High";
+    inline constexpr char const *CFG_MAX_STACKS_PER_ITEM = "ModDynamicAH.MaxStacksPerItemPerCycle";
 
     inline constexpr char const *CFG_PRICE_MUL_DUST = "ModDynamicAH.PriceMul.Dust";
     inline constexpr char const *CFG_PRICE_MUL_ESSENCE = "ModDynamicAH.PriceMul.Essence";

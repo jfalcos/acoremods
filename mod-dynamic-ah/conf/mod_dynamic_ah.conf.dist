@@ -54,12 +54,16 @@ ModDynamicAH.Economy.QuestsPerFamily.Other  = 5
 ############################
 #  Context planner         #
 ############################
-# When enabled, the seller inspects the professions/skill of players currently online and lists
-# only the material tiers relevant to them (deduped per faction), so listings track the
-# population's level progression. If nobody with professions is online, a light baseline of the
-# core gathering families is listed so the AH never goes empty.
+# When enabled, the seller inspects the professions/skill of real (non-bot) characters who have
+# played within ModDynamicAH.Context.ActivityWindowDays days (or are online now) and lists only
+# the material tiers relevant to them (deduped per faction), so listings track the real
+# playerbase's level progression instead of whichever playerbots happen to be logged in. If no
+# active real players have professions, a light baseline of the core gathering families is
+# listed so the AH never goes empty.
 ModDynamicAH.Context.Enabled                = 1
-ModDynamicAH.Debug.ContextLogs              = 0          # 1 = verbose
+ModDynamicAH.Context.ActivityWindowDays     = 7
+ModDynamicAH.Context.BotAccountPrefix       = rndbot     # matches mod-playerbots' AiPlayerbot.RandomBotAccountPrefix
+ModDynamicAH.Context.DebugLogs              = 0          # 1 = verbose
 
 ############################
 #  Random planner          #
@@ -85,30 +89,36 @@ ModDynamicAH.Stack.Ink              = 10
 # Gems are always listed as singles (players buy one to cut), regardless of this section.
 # keep others at Default unless needed
 
+# Hard ceiling on separate auctions of the SAME item/house per cycle, shared across every code
+# path that might post that item (curated tables + the recipe-driven completeness sweep).
+ModDynamicAH.MaxStacksPerItemPerCycle = 8
+
 ############################
 #  Caps (anti-flood)       #
 ############################
 ModDynamicAH.Cap.Enabled                 = 1
-ModDynamicAH.Cap.TotalPerCycle           = 150
-ModDynamicAH.Cap.House.Alliance          = 80
-ModDynamicAH.Cap.House.Horde             = 80
-ModDynamicAH.Cap.House.Neutral           = 120
-ModDynamicAH.Cap.Family.Herb             = 60
-ModDynamicAH.Cap.Family.Ore              = 50
-ModDynamicAH.Cap.Family.Bar              = 50
-ModDynamicAH.Cap.Family.Cloth            = 60
-ModDynamicAH.Cap.Family.Leather          = 40
-ModDynamicAH.Cap.Family.Dust             = 40
-ModDynamicAH.Cap.Family.Essence          = 40
-ModDynamicAH.Cap.Family.Shard            = 25
-ModDynamicAH.Cap.Family.Stone            = 40
-ModDynamicAH.Cap.Family.Meat             = 20
-ModDynamicAH.Cap.Family.Fish             = 20
-ModDynamicAH.Cap.Family.Gem              = 30
-ModDynamicAH.Cap.Family.Pigment          = 30
-ModDynamicAH.Cap.Family.Ink              = 20
-ModDynamicAH.Cap.Family.Elemental        = 30
-ModDynamicAH.Cap.Family.Other            = 80
+ModDynamicAH.Cap.TotalPerCycle           = 4000
+ModDynamicAH.Cap.House.Alliance          = 1800
+ModDynamicAH.Cap.House.Horde             = 1800
+ModDynamicAH.Cap.House.Neutral           = 1200
+ModDynamicAH.Cap.Family.Herb             = 280
+ModDynamicAH.Cap.Family.Ore              = 240
+ModDynamicAH.Cap.Family.Bar              = 240
+ModDynamicAH.Cap.Family.Cloth            = 280
+ModDynamicAH.Cap.Family.Leather          = 200
+ModDynamicAH.Cap.Family.Dust             = 180
+ModDynamicAH.Cap.Family.Essence          = 180
+ModDynamicAH.Cap.Family.Shard            = 180
+ModDynamicAH.Cap.Family.Stone            = 180
+ModDynamicAH.Cap.Family.Meat             = 150
+ModDynamicAH.Cap.Family.Fish             = 150
+ModDynamicAH.Cap.Family.Gem              = 140
+ModDynamicAH.Cap.Family.Pigment          = 100
+ModDynamicAH.Cap.Family.Ink              = 100
+ModDynamicAH.Cap.Family.Elemental        = 140
+ModDynamicAH.Cap.Family.Engineering      = 180
+ModDynamicAH.Cap.Family.RareRaw          = 80
+ModDynamicAH.Cap.Family.Other            = 300
 
 ############################
 #  Buyer engine            #
