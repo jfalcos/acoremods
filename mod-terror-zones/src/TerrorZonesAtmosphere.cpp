@@ -2,6 +2,7 @@
 // Everything in here either pushes a weather override onto the live
 // maps or mutates the active rotation's flavor/tier state.
 
+#include "TerrorZonesCombatMgr.h"
 #include "TerrorZonesMgr.h"
 
 #include "DatabaseEnv.h"
@@ -205,7 +206,8 @@ bool TerrorZonesMgr::SetActiveTier(Tier tier)
     // _scalingRescaleOnTick config gate (this is a GM-driven
     // explicit retune, not the auto-tick edge rescale).
     for (ActiveSlot const& s : _rotation.slots)
-        WalkZoneRescale(s.zoneId, /*edgeOn*/ true, /*force*/ true);
+        TerrorZonesCombatMgr::Instance().WalkZoneRescale(
+            s.zoneId, /*edgeOn*/ true, /*force*/ true);
 
     CharacterDatabase.Execute(
         "UPDATE terror_zones_history SET tier = {} WHERE tick_at = {}",

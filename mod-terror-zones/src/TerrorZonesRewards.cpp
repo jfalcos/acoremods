@@ -8,7 +8,9 @@
 // enabled AND the slot's tier is non-zero; otherwise they fall back to
 // the Slice 4 flat per-flavor overlay path for rollback insurance.
 
+#include "TerrorZonesCombatMgr.h"
 #include "TerrorZonesMgr.h"
+#include "TerrorZonesTierMgr.h"
 
 #include "Creature.h"
 #include "ItemTemplate.h"
@@ -71,15 +73,6 @@ bool TerrorZonesMgr::TryGetSlotForZone(uint32 zoneId, ActiveSlot& out) const
     return false;
 }
 
-float TerrorZonesMgr::RollAxis(ActiveSlot const& slot, RewardAxis axis) const
-{
-    auto rot = std::atomic_load_explicit(&_rotationSnap,
-                                          std::memory_order_acquire);
-    uint64 tickAt = rot ? rot->tickAt : 0;
-    return ComputeAxisRoll(tickAt, slot.slotIndex, slot.flavor,
-                            slot.tier, axis, _tierCfg);
-}
-
 void TerrorZonesMgr::ApplyXpMultiplier(uint32& amount, Player* player) const
 {
     if (!IsRewardsEnabled() || amount == 0)
@@ -95,9 +88,9 @@ void TerrorZonesMgr::ApplyXpMultiplier(uint32& amount, Player* player) const
     float effectiveMult;
     float rolledOrFlavor;
     char const* source;
-    if (_tierEnabled && slot.tier != TIER_NONE)
+    if (TerrorZonesTierMgr::Instance().IsTierEnabled() && slot.tier != TIER_NONE)
     {
-        rolledOrFlavor = RollAxis(slot, AXIS_XP);
+        rolledOrFlavor = TerrorZonesTierMgr::Instance().RollAxis(slot, AXIS_XP);
         effectiveMult = _xpMultiplier * rolledOrFlavor;
         source = "tier";
     }
@@ -122,8 +115,8 @@ void TerrorZonesMgr::ApplyXpMultiplier(uint32& amount, Player* player) const
 
 float TerrorZonesMgr::EffectiveGoldRoll(ActiveSlot const& slot) const
 {
-    if (_tierEnabled && slot.tier != TIER_NONE)
-        return RollAxis(slot, AXIS_GOLD);
+    if (TerrorZonesTierMgr::Instance().IsTierEnabled() && slot.tier != TIER_NONE)
+        return TerrorZonesTierMgr::Instance().RollAxis(slot, AXIS_GOLD);
     if (slot.flavor != FLAVOR_NONE)
         return _flavorGoldBoost[slot.flavor - 1];
     return 1.0f;
@@ -140,7 +133,7 @@ uint32 TerrorZonesMgr::ComputeEmpoweredGold(uint32 nativeGold, uint32 zoneId,
     // a level-uplift factor on top: (scaledLevel / poolLevelMax)^exp, so
     // scaled encounters pay out at something like the level they feel.
     float levelFactor = 1.0f;
-    uint8 scaledLevel = ComputeTargetLevel(zoneId);
+    uint8 scaledLevel = TerrorZonesCombatMgr::Instance().ComputeTargetLevel(zoneId);
     if (scaledLevel > 0 && _goldLevelRatioExp > 0.0f)
     {
         // `_pool` / `_poolIndex` are write-once at LoadPool.
@@ -219,7 +212,7 @@ void TerrorZonesMgr::ApplyKillGoldFloor(Creature* killed, Player* killer)
     // Only the empowered-zone threats earn the floor; critters, pets,
     // totems, triggers, world bosses, and friendly NPCs are excluded by
     // the same predicate the level-scaler uses.
-    if (!IsScalingEligible(killed))
+    if (!TerrorZonesCombatMgr::Instance().IsScalingEligible(killed))
         return;
 
     uint32 zoneId = killer->GetZoneId();
@@ -234,7 +227,7 @@ void TerrorZonesMgr::ApplyKillGoldFloor(Creature* killed, Player* killer)
     // whichever is larger. The multiply happens here (not at loot-money
     // click) so the pile is correct even if the player never clicks a
     // small native amount.
-    uint8 scaledLevel = ComputeTargetLevel(zoneId);
+    uint8 scaledLevel = TerrorZonesCombatMgr::Instance().ComputeTargetLevel(zoneId);
     uint8 refLevel = scaledLevel > 0 ? scaledLevel : killer->GetLevel();
 
     uint32 multiplied = ComputeEmpoweredGold(killed->loot.gold, zoneId, slot);
@@ -293,9 +286,9 @@ void TerrorZonesMgr::ApplyQuestGoldMultiplier(int32& moneyRew, Player* player) c
     float rolledOrFlavor;
     float effectiveMult;
     char const* source;
-    if (_tierEnabled && slot.tier != TIER_NONE)
+    if (TerrorZonesTierMgr::Instance().IsTierEnabled() && slot.tier != TIER_NONE)
     {
-        rolledOrFlavor = RollAxis(slot, AXIS_GOLD);
+        rolledOrFlavor = TerrorZonesTierMgr::Instance().RollAxis(slot, AXIS_GOLD);
         effectiveMult = _goldMultiplier * rolledOrFlavor;
         source = "tier";
     }
@@ -395,11 +388,11 @@ bool TerrorZonesMgr::TryTierBump(Player const* player, ::LootStoreItem* item)
     // setting it to 0 disables bumps entirely regardless of tier config.
     float effectiveChance;
     char const* source;
-    if (_tierEnabled && slot.tier != TIER_NONE)
+    if (TerrorZonesTierMgr::Instance().IsTierEnabled() && slot.tier != TIER_NONE)
     {
         if (_tierBumpChance <= 0.0f)
             return false;
-        effectiveChance = RollAxis(slot, AXIS_TIER_BUMP);
+        effectiveChance = TerrorZonesTierMgr::Instance().RollAxis(slot, AXIS_TIER_BUMP);
         source = "tier";
     }
     else
@@ -424,7 +417,7 @@ bool TerrorZonesMgr::TryTierBump(Player const* player, ::LootStoreItem* item)
     // drop a ~70 blue instead of the level-19 blue that matched the
     // untouched template. Falls back to the item's own RequiredLevel on
     // the defensive path where ComputeTargetLevel returns 0.
-    uint8 scaledLevel = ComputeTargetLevel(zoneId);
+    uint8 scaledLevel = TerrorZonesCombatMgr::Instance().ComputeTargetLevel(zoneId);
     uint32 referenceLevel = (scaledLevel > 0)
                           ? static_cast<uint32>(scaledLevel)
                           : tmpl->RequiredLevel;
@@ -470,8 +463,31 @@ bool TerrorZonesMgr::TryTierBump(Player const* player, ::LootStoreItem* item)
                  tmpl->RequiredLevel, newId, targetQuality,
                  effectiveChance, source);
 
+    // Record the pre-mutation itemid before touching the shared pointer,
+    // so RevertTierBumps() can restore it once this loot-template pass
+    // finishes. try_emplace is insert-only: if `item` was already bumped
+    // once earlier in this same Process() call (e.g. rolled again via a
+    // reference template), this keeps that FIRST recorded value -- the
+    // true pre-pass original -- rather than overwriting it with the
+    // itemid this second bump is about to replace.
+    _tierBumpReverts.try_emplace(item, item->itemid);
     item->itemid = newId;
     return true;
+}
+
+// Reverts every LootStoreItem::itemid TryTierBump mutated during the
+// loot-template pass that just finished (see OnAfterLootTemplateProcess
+// in TerrorZonesRewardScripts.cpp) and clears the pending set. `item` is
+// a raw pointer into the process-lifetime shared LootTemplate::Entries
+// list -- left mutated, this would permanently corrupt that template's
+// drops for every future roll, in every zone, server-wide, regardless of
+// empowerment state (the same bug class TryGatheringYieldBump's comment
+// above describes and was fixed for).
+void TerrorZonesMgr::RevertTierBumps()
+{
+    for (auto& [item, originalItemId] : _tierBumpReverts)
+        item->itemid = originalItemId;
+    _tierBumpReverts.clear();
 }
 
 // --- Prospector's gathering-yield overlay (plan §9.1) ---
@@ -511,9 +527,9 @@ bool TerrorZonesMgr::TryGatheringYieldBump(Player const* player,
 
     float yieldMult;
     char const* source;
-    if (_tierEnabled && slot.tier != TIER_NONE)
+    if (TerrorZonesTierMgr::Instance().IsTierEnabled() && slot.tier != TIER_NONE)
     {
-        yieldMult = RollAxis(slot, AXIS_GATHERING);
+        yieldMult = TerrorZonesTierMgr::Instance().RollAxis(slot, AXIS_GATHERING);
         source = "tier";
     }
     else
@@ -631,11 +647,11 @@ void TerrorZonesMgr::TryUniqueDrop(Player const* player, Loot* loot,
     // the flat Slice-4 BaseChance. Base stays as a kill-switch (0 = off).
     float uniqueChance;
     char const* source;
-    if (_tierEnabled && slot.tier != TIER_NONE)
+    if (TerrorZonesTierMgr::Instance().IsTierEnabled() && slot.tier != TIER_NONE)
     {
         if (_flavorUniquesBaseChance <= 0.0f)
             return;
-        uniqueChance = RollAxis(slot, AXIS_UNIQUES);
+        uniqueChance = TerrorZonesTierMgr::Instance().RollAxis(slot, AXIS_UNIQUES);
         source = "tier";
     }
     else
@@ -648,7 +664,7 @@ void TerrorZonesMgr::TryUniqueDrop(Player const* player, Loot* loot,
     if (uniqueChance <= 0.0f)
         return;
 
-    uint8 scaledLevel = ComputeTargetLevel(zoneId);
+    uint8 scaledLevel = TerrorZonesCombatMgr::Instance().ComputeTargetLevel(zoneId);
     if (_flavorUniquesMinMobLevel > 0
         && static_cast<uint32>(scaledLevel) < _flavorUniquesMinMobLevel)
         return;

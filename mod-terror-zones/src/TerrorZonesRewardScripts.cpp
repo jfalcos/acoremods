@@ -1,3 +1,5 @@
+#include "TerrorZonesCombatMgr.h"
+#include "TerrorZonesContractMgr.h"
 #include "TerrorZonesMgr.h"
 
 #include "Creature.h"
@@ -46,10 +48,10 @@ namespace
             mgr.ApplyKillGoldFloor(killed, killer);
             mgr.ApplyEventBossGoldUplift(killed->loot, killer);
             // Slice 10 Pass 2 — accrue per-TZ contract credit (write-through).
-            mgr.AccrueContractCredit(killed, killer);
+            TerrorZonesContractMgr::Instance().AccrueContractCredit(killed, killer);
             // Slice 10 Pass 3 — release group-scale tracking so a respawn
             // of this creature re-scales for groups within the rotation.
-            mgr.OnCreatureKilled(killed);
+            TerrorZonesCombatMgr::Instance().OnCreatureKilled(killed);
         }
 
         void OnPlayerQuestComputeMoney(Player* player, Quest const* /*quest*/,
@@ -85,10 +87,36 @@ namespace
             mgr.TryEventBossDrop(player, loot);
         }
     };
+
+    // Audit F5 fix — reverts TryTierBump's shared-template mutations.
+    // `tab->Process(...)` (LootMgr.cpp) runs every OnBeforeDropAddItem
+    // call for the WHOLE loot-template tree (including nested reference
+    // templates), then fires OnAfterLootTemplateProcess exactly once,
+    // right after, with the fully-built Loot* -- the correct "this pass
+    // is done, clean up the shared template now" signal. Separate
+    // MiscScript (not GlobalScript, which doesn't declare this hook).
+    class TerrorZones_LootCleanupScript : public MiscScript
+    {
+    public:
+        TerrorZones_LootCleanupScript()
+            : MiscScript("TerrorZones_LootCleanupScript") {}
+
+        void OnAfterLootTemplateProcess(Loot* /*loot*/,
+                                        LootTemplate const* /*tab*/,
+                                        LootStore const& /*store*/,
+                                        Player* /*lootOwner*/,
+                                        bool /*personal*/,
+                                        bool /*noEmptyError*/,
+                                        uint16 /*lootMode*/) override
+        {
+            TerrorZonesMgr::Instance().RevertTierBumps();
+        }
+    };
 }
 
 void AddTerrorZonesRewardScripts()
 {
     new TerrorZones_RewardPlayerScript();
     new TerrorZones_RewardGlobalScript();
+    new TerrorZones_LootCleanupScript();
 }

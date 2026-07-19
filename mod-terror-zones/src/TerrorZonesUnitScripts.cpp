@@ -3,7 +3,7 @@
 // class-per-file convention used elsewhere in the module calls for
 // its own file.
 
-#include "TerrorZonesMgr.h"
+#include "TerrorZonesCombatMgr.h"
 
 #include "ScriptMgr.h"
 #include "Unit.h"
@@ -24,7 +24,7 @@ namespace
         void OnDamage(Unit* attacker, Unit* victim,
                       uint32& damage) override
         {
-            auto& mgr = TerrorZonesMgr::Instance();
+            auto& mgr = TerrorZonesCombatMgr::Instance();
             // Slice 8 — creature outgoing-damage mult.
             mgr.OnUnitDealDamage(attacker, victim, damage);
             // Slice 10 Pass 3 — engage-time group HP scaling (player→mob).

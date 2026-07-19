@@ -1,4 +1,8 @@
+#include "TerrorZonesCombatMgr.h"
+#include "TerrorZonesContractMgr.h"
 #include "TerrorZonesMgr.h"
+#include "TerrorZonesPlayerPrefsMgr.h"
+#include "TerrorZonesTierMgr.h"
 
 #include "Chat.h"
 #include "ChatCommand.h"
@@ -102,6 +106,8 @@ namespace
     bool HandleZonesInfo(ChatHandler* handler, char const* /*args*/)
     {
         auto& mgr = TerrorZonesMgr::Instance();
+        auto& combat = TerrorZonesCombatMgr::Instance();
+        auto& tier = TerrorZonesTierMgr::Instance();
         if (!mgr.IsEnabled())
         {
             handler->SendSysMessage("Terror Zones is disabled.");
@@ -128,17 +134,17 @@ namespace
                                      s.zoneId);
             // Slice 10 Pass 2 — the caller's banked contract credit for
             // this zone (the bounty mailed when the rotation ends).
-            if (mgr.IsContractEnabled())
+            if (TerrorZonesContractMgr::Instance().IsEnabled())
             {
                 if (Player* self = handler->GetPlayer())
                 {
-                    uint32 cr = mgr.GetContractCreditFor(
+                    uint32 cr = TerrorZonesContractMgr::Instance().GetContractCreditFor(
                         self->GetGUID().GetCounter(), s.zoneId);
                     handler->PSendSysMessage(
                         "    Your bounty  {} credit banked", cr);
                 }
             }
-            if (mgr.IsTierEnabled() && s.tier != TIER_NONE
+            if (tier.IsTierEnabled() && s.tier != TIER_NONE
                 && s.flavor != FLAVOR_NONE)
             {
                 FlavorBiasDef const& bias = FlavorBiasOf(s.flavor);
@@ -151,7 +157,7 @@ namespace
                     else if (bias.secondaryA == axis
                              || bias.secondaryB == axis)
                         tag = "secondary";
-                    float v = mgr.RollAxis(s, axis);
+                    float v = tier.RollAxis(s, axis);
                     handler->PSendSysMessage("{}",
                         FormatAxisLine(axis, v, tag));
                 }
@@ -161,12 +167,12 @@ namespace
             // + damage mults for the slot. Tier bonus displayed
             // separately so GMs can read both the baseline and the
             // tier contribution at a glance.
-            if (mgr.IsCombatEnabled())
+            if (combat.IsCombatEnabled())
             {
-                float hpTier  = mgr.GetTierHpBonus(s.tier);
-                float dmgTier = mgr.GetTierDamageBonus(s.tier);
-                float hpMult  = mgr.GetCombatHpMult() * hpTier;
-                float dmgMult = mgr.GetCombatDamageMult() * dmgTier;
+                float hpTier  = combat.GetTierHpBonus(s.tier);
+                float dmgTier = combat.GetTierDamageBonus(s.tier);
+                float hpMult  = combat.GetCombatHpMult() * hpTier;
+                float dmgMult = combat.GetCombatDamageMult() * dmgTier;
                 uint32 tierNum = (s.tier == TIER_NONE)
                     ? 1u : static_cast<uint32>(s.tier);
                 handler->PSendSysMessage(
@@ -176,11 +182,11 @@ namespace
 
                 // Slice 8b — show elite-density only when the slot's
                 // tier actually carries promotion (T1/T2 default 0).
-                uint32 densityPm = mgr.GetEliteDensityPerMille(s.tier);
+                uint32 densityPm = combat.GetEliteDensityPerMille(s.tier);
                 if (densityPm > 0)
                 {
-                    float eliteHp  = mgr.GetEliteHpUplift();
-                    float eliteDmg = mgr.GetEliteDamageUplift();
+                    float eliteHp  = combat.GetEliteHpUplift();
+                    float eliteDmg = combat.GetEliteDamageUplift();
                     handler->PSendSysMessage(
                         "    Elite       {:.1f}% promoted "
                         "(HP x{:.2f}, Damage x{:.2f})",
@@ -213,11 +219,11 @@ namespace
                     // Slice 8 — event-boss HP mult shown inline so GMs
                     // can eyeball the full combat profile without
                     // inspecting the creature.
-                    if (e.type == EVENT_WORLD_BOSS && mgr.IsCombatEnabled())
+                    if (e.type == EVENT_WORLD_BOSS && combat.IsCombatEnabled())
                     {
-                        float hpTier = mgr.GetTierHpBonus(s.tier);
-                        float hpMult = mgr.GetCombatHpMult() * hpTier
-                                     * mgr.GetEventBossHpUplift();
+                        float hpTier = combat.GetTierHpBonus(s.tier);
+                        float hpMult = combat.GetCombatHpMult() * hpTier
+                                     * combat.GetEventBossHpUplift();
                         handler->PSendSysMessage(
                             "      * {}: {} — {} (HP x{:.2f})",
                             EventTypeDisplayName(e.type),
@@ -336,7 +342,7 @@ namespace
 
         void PrintAnnounceStatus(ChatHandler* handler, Player* player)
         {
-            auto& mgr = TerrorZonesMgr::Instance();
+            auto& mgr = TerrorZonesPlayerPrefsMgr::Instance();
             bool master = mgr.IsAnnounceEnabled(player);
             uint8 player_mask = mgr.GetAnnounceCategories(player);
             uint8 global_mask = mgr.GetGlobalAnnounceCategoryMask();
@@ -372,7 +378,7 @@ namespace
         if (!player)
             return false;
 
-        auto& mgr = TerrorZonesMgr::Instance();
+        auto& mgr = TerrorZonesPlayerPrefsMgr::Instance();
         std::vector<std::string> tokens = SplitArgs(args ? args : "");
 
         if (tokens.empty())

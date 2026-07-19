@@ -1,4 +1,6 @@
 #include "TerrorZonesMgr.h"
+#include "TerrorZonesPlayerPrefsMgr.h"
+#include "TerrorZonesTeleportMgr.h"
 
 #include "Player.h"
 #include "ScriptMgr.h"
@@ -15,22 +17,22 @@ namespace
         void OnPlayerLogin(Player* player) override
         {
             TerrorZonesMgr::Instance().OnPlayerLogin(player);
-            TerrorZonesMgr::Instance().LoadTierTeleportProgress(player);
+            TerrorZonesTeleportMgr::Instance().LoadTierTeleportProgress(player);
         }
 
         void OnPlayerLogout(Player* player) override
         {
             if (!player)
                 return;
-            auto& mgr = TerrorZonesMgr::Instance();
-            mgr.FlushPlayerPref(player);
-            mgr.UnloadPlayerPref(player->GetGUID());
-            mgr.UnloadTierTeleportProgress(player->GetGUID());
+            auto& prefs = TerrorZonesPlayerPrefsMgr::Instance();
+            prefs.FlushPlayerPref(player);
+            prefs.UnloadPlayerPref(player->GetGUID());
+            TerrorZonesTeleportMgr::Instance().UnloadTierTeleportProgress(player->GetGUID());
         }
 
         void OnPlayerSave(Player* player) override
         {
-            TerrorZonesMgr::Instance().FlushPlayerPref(player);
+            TerrorZonesPlayerPrefsMgr::Instance().FlushPlayerPref(player);
         }
 
         void OnPlayerUpdateZone(Player* player, uint32 newZone,

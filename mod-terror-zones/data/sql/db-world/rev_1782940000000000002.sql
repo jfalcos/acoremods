@@ -24,12 +24,58 @@
 --    (TerrorZones.Teleport.Spell.T1..T5), not hardcoded in SQL.
 -- ============================================================
 
-ALTER TABLE `terror_zones_pool`
-    ADD COLUMN `tp_map` INT NOT NULL DEFAULT -1,
-    ADD COLUMN `tp_x` FLOAT NOT NULL DEFAULT 0,
-    ADD COLUMN `tp_y` FLOAT NOT NULL DEFAULT 0,
-    ADD COLUMN `tp_z` FLOAT NOT NULL DEFAULT 0,
-    ADD COLUMN `tp_o` FLOAT NOT NULL DEFAULT 0;
+-- Idempotency guard: this ALTER ran against the live DB previously but
+-- the run was never recorded in the `updates` tracking table
+-- (state/record drift discovered 2026-07-05 while rebuilding the
+-- ac-db-import image for an unrelated change). Real MySQL (this
+-- deployment runs MySQL 8.4) has no `ADD COLUMN IF NOT EXISTS` --
+-- that's a MariaDB-only extension -- so the standard information_schema
+-- + dynamic-SQL idiom is used instead to make each ADD COLUMN safe to
+-- replay.
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'terror_zones_pool'
+      AND column_name = 'tp_map');
+SET @ddl = IF(@col_exists = 0,
+    'ALTER TABLE `terror_zones_pool` ADD COLUMN `tp_map` INT NOT NULL DEFAULT -1',
+    'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'terror_zones_pool'
+      AND column_name = 'tp_x');
+SET @ddl = IF(@col_exists = 0,
+    'ALTER TABLE `terror_zones_pool` ADD COLUMN `tp_x` FLOAT NOT NULL DEFAULT 0',
+    'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'terror_zones_pool'
+      AND column_name = 'tp_y');
+SET @ddl = IF(@col_exists = 0,
+    'ALTER TABLE `terror_zones_pool` ADD COLUMN `tp_y` FLOAT NOT NULL DEFAULT 0',
+    'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'terror_zones_pool'
+      AND column_name = 'tp_z');
+SET @ddl = IF(@col_exists = 0,
+    'ALTER TABLE `terror_zones_pool` ADD COLUMN `tp_z` FLOAT NOT NULL DEFAULT 0',
+    'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'terror_zones_pool'
+      AND column_name = 'tp_o');
+SET @ddl = IF(@col_exists = 0,
+    'ALTER TABLE `terror_zones_pool` ADD COLUMN `tp_o` FLOAT NOT NULL DEFAULT 0',
+    'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 UPDATE `terror_zones_pool`
 SET tp_map = 0, tp_x = -8947.64, tp_y = -132.319, tp_z = 83.7199, tp_o = 3.33358

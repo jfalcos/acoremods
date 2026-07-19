@@ -4,17 +4,12 @@
 // beacon item's gossip menu (TerrorZonesTeleportItem.cpp) — granted once,
 // on the first tier ever unlocked. Independent of, but fed by, the same
 // per-kill credit AccrueContractCredit already computes for the mailed
-// contract reward (see TerrorZonesContract.cpp).
-//
-// character_terror_zones_tier_progress is the persistence source of
-// truth; _tierProgress is the in-session working copy, loaded whole at
-// login (LoadTierTeleportProgress) and erased at logout
-// (UnloadTierTeleportProgress) — same pattern as LoadPlayerPref /
-// UnloadPlayerPref.
-
+// contract reward (see TerrorZonesContractMgr.cpp).
+#include "TerrorZonesTeleportMgr.h"
 #include "TerrorZonesMgr.h"
 
 #include "Chat.h"
+#include "Config.h"
 #include "DatabaseEnv.h"
 #include "Field.h"
 #include "Item.h"
@@ -29,7 +24,38 @@
 namespace mod_terror_zones
 {
 
-void TerrorZonesMgr::LoadTierTeleportProgress(Player* player)
+TerrorZonesTeleportMgr& TerrorZonesTeleportMgr::Instance()
+{
+    static TerrorZonesTeleportMgr inst;
+    return inst;
+}
+
+void TerrorZonesTeleportMgr::LoadConfig()
+{
+    _teleportEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Teleport.Enable", true);
+    _teleportUnlockThreshold[TIER_1] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T1", 800);
+    _teleportUnlockThreshold[TIER_2] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T2", 1200);
+    _teleportUnlockThreshold[TIER_3] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T3", 1800);
+    _teleportUnlockThreshold[TIER_4] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T4", 2600);
+    _teleportUnlockThreshold[TIER_5] = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.UnlockThreshold.T5", 4000);
+    // 0 (default) means "not configured" — no item entry assigned yet, so
+    // an unlock has nothing to grant.
+    _teleportItemEntry = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Teleport.ItemEntry", 0);
+}
+
+bool TerrorZonesTeleportMgr::IsEnabled() const
+{
+    return TerrorZonesMgr::Instance().IsEnabled() && _teleportEnabled;
+}
+
+void TerrorZonesTeleportMgr::LoadTierTeleportProgress(Player* player)
 {
     if (!player)
         return;
@@ -57,15 +83,15 @@ void TerrorZonesMgr::LoadTierTeleportProgress(Player* player)
     _tierProgress[guidLow] = progress;
 }
 
-void TerrorZonesMgr::UnloadTierTeleportProgress(ObjectGuid guid)
+void TerrorZonesTeleportMgr::UnloadTierTeleportProgress(ObjectGuid guid)
 {
     _tierProgress.erase(guid.GetCounter());
 }
 
-void TerrorZonesMgr::AccrueTierTeleportCredit(Player* player, uint8 tier,
-                                               uint32 addCredit)
+void TerrorZonesTeleportMgr::AccrueTierTeleportCredit(Player* player, uint8 tier,
+                                                       uint32 addCredit)
 {
-    if (!IsTeleportEnabled() || !player || !player->IsInWorld())
+    if (!IsEnabled() || !player || !player->IsInWorld())
         return;
     if (tier < 1 || tier > TIER_MAX || addCredit == 0)
         return;
@@ -125,7 +151,7 @@ void TerrorZonesMgr::AccrueTierTeleportCredit(Player* player, uint8 tier,
         }
     }
 
-    if (_debug)
+    if (TerrorZonesMgr::Instance().IsDebug())
         LOG_INFO("module",
                  "mod-terror-zones: guid={} unlocked Tier {} teleport "
                  "(credit {}/{}).",
@@ -139,7 +165,7 @@ void TerrorZonesMgr::AccrueTierTeleportCredit(Player* player, uint8 tier,
             static_cast<uint32>(tier));
 }
 
-bool TerrorZonesMgr::IsTierUnlockedFor(Player const* player, uint8 tier) const
+bool TerrorZonesTeleportMgr::IsTierUnlockedFor(Player const* player, uint8 tier) const
 {
     if (!player || tier < 1 || tier > TIER_MAX)
         return false;
@@ -149,35 +175,38 @@ bool TerrorZonesMgr::IsTierUnlockedFor(Player const* player, uint8 tier) const
     return it->second[tier].unlocked;
 }
 
-bool TerrorZonesMgr::TeleportPlayerToTier(Player* player, uint8 tier)
+bool TerrorZonesTeleportMgr::TeleportPlayerToTier(Player* player, uint8 tier)
 {
     if (!player)
         return false;
     if (tier < 1 || tier > TIER_MAX)
         return false;
 
-    for (ActiveSlot const& slot : _rotation.slots)
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
+    ActiveRotation rot = core.GetActiveRotation();
+    for (ActiveSlot const& slot : rot.slots)
     {
         if (static_cast<uint8>(slot.tier) != tier)
             continue;
 
-        auto pit = _poolIndex.find(slot.zoneId);
-        if (pit == _poolIndex.end() || pit->second >= _pool.size())
-            continue;
-        PoolEntry const& zone = _pool[pit->second];
-        if (zone.tpMap < 0)
+        for (PoolEntry const& zone : core.GetPool())
         {
-            ChatHandler(player->GetSession())
-                .PSendSysMessage(
-                    "|cff33ff99[Terror Zone]|r {} (Tier {}) has no "
-                    "teleport landing point configured yet.",
-                    zone.displayName, static_cast<uint32>(tier));
-            return false;
-        }
+            if (zone.zoneId != slot.zoneId)
+                continue;
+            if (zone.tpMap < 0)
+            {
+                ChatHandler(player->GetSession())
+                    .PSendSysMessage(
+                        "|cff33ff99[Terror Zone]|r {} (Tier {}) has no "
+                        "teleport landing point configured yet.",
+                        zone.displayName, static_cast<uint32>(tier));
+                return false;
+            }
 
-        player->TeleportTo(static_cast<uint32>(zone.tpMap), zone.tpX,
-                            zone.tpY, zone.tpZ, zone.tpO);
-        return true;
+            player->TeleportTo(static_cast<uint32>(zone.tpMap), zone.tpX,
+                                zone.tpY, zone.tpZ, zone.tpO);
+            return true;
+        }
     }
 
     ChatHandler(player->GetSession())
@@ -188,4 +217,4 @@ bool TerrorZonesMgr::TeleportPlayerToTier(Player* player, uint8 tier)
     return false;
 }
 
-}
+}  // namespace mod_terror_zones

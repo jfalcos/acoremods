@@ -1,8 +1,10 @@
 #ifndef MOD_TERROR_ZONES_MGR_H
 #define MOD_TERROR_ZONES_MGR_H
 
+#include "AsyncCallbackProcessor.h"
 #include "Define.h"
 #include "ObjectGuid.h"
+#include "QueryCallback.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -17,6 +19,7 @@ class Creature;
 class LootStore;
 class Player;
 class Unit;
+class WorldSession;
 struct Loot;
 struct LootStoreItem;
 
@@ -155,6 +158,14 @@ struct EventBossDef
     // anchor — auto-granted/revoked at 1Hz while the event is
     // ACTIVE and the player is in the zone.
     uint32 trackerQuestId;
+    // Anti-duplication fix: DB spawn id (`creature.guid`) of the native
+    // creature already standing at (anchorX, anchorY, anchorZ), resolved
+    // once at LoadEventContent via a proximity query. 0 = no confident
+    // native match found — SpawnWorldBoss falls back to summoning a
+    // TempSummon as before. Non-zero — SpawnWorldBoss possesses/relevels
+    // that existing creature instead of creating a duplicate standing
+    // next to it.
+    uint32 nativeSpawnGuid = 0;
 };
 
 // Curated node-surge definition loaded from
@@ -210,6 +221,12 @@ struct ActiveEvent
     // terror_zones_events.countdown_fired so a restart doesn't
     // re-fire the "ending in N minutes" zone-scoped warning.
     bool countdownFired = false;
+    // Anti-duplication fix: true when `spawnedCreatures` holds a
+    // possessed NATIVE creature (EventBossDef::nativeSpawnGuid resolved
+    // and was alive at fire time) rather than a module-owned TempSummon.
+    // DespawnEventCreatures branches on this — a native must be
+    // relevel-reverted in place at EndEvent, never despawned/removed.
+    bool bossIsNative = false;
 };
 
 struct PoolEntry
@@ -468,7 +485,7 @@ bool IsPromotedSpawn(uint64 rawGuid,
 
 // Slice 7 — per-category announcement gating. Eight categories cover
 // every player-visible chat line the module emits. Each category has
-// (a) a server-side config gate stored in the Mgr's
+// (a) a server-side config gate stored in TerrorZonesPlayerPrefsMgr's
 // `_announceCategoryGlobal` bitmask, (b) a per-player bit in
 // `character_terror_zones_prefs.announce_categories`, and (c) the
 // existing per-player master toggle `announce_enabled`. A line fires
@@ -591,6 +608,53 @@ struct HistoryTick
     std::vector<ActiveSlot> slots;
 };
 
+// Slice 8b cleanup — lock-free atomic-shared_ptr snapshot for the combat
+// kHz-read hot path (OnAfterCreatureSelectLevel, OnUnitDealDamage). Moved
+// to namespace scope (full decomposition) so TerrorZonesCombatMgr can use
+// it as a public accessor return type without exposing TerrorZonesMgr's
+// broader private state.
+//
+// Every writer in this module runs on the world thread (AC's
+// single-threaded `MapUpdate.Threads = 1` model: rotation tick, event
+// tick, creature SelectLevel, damage dispatch, loot mutation,
+// player-script hooks, and command handlers all fire on the same
+// thread). The writer (TerrorZonesMgr::PublishCombatHot) mutates the
+// underlying mutable rotation/event state directly, then publishes a
+// fresh immutable snapshot.
+//
+// Readers atomic-load the snapshot and walk it without any
+// synchronization. Stored as a plain shared_ptr accessed via the C++17
+// `std::atomic_load` / `std::atomic_store` free-function overloads —
+// `std::atomic<std::shared_ptr<...>>` only landed in libstdc++ 12, but
+// the free-function form is stable since C++11 and the AC worldserver
+// build image ships libstdc++ 11.
+struct CombatHotState
+{
+    struct SlotView
+    {
+        uint32 zoneId;
+        Tier   tier;
+    };
+    // Small — at most 4 slots per spec. Linear scan beats map
+    // lookup at this size.
+    std::vector<SlotView> slots;
+    // Event-boss GUID set for damage-path uplift membership
+    // check. Raw ObjectGuid values, same keying as
+    // `_eventBossSpawnIndex`.
+    std::unordered_set<uint64> eventBossGuids;
+    // Per-GUID tier captured at spawn time so damage scaling
+    // uses the boss's source rotation slot tier, not whatever
+    // tier the boss's current zone happens to have right now
+    // (which may differ from spawn time, or be empty if the
+    // boss is in a non-rotation zone).
+    std::unordered_map<uint64, Tier> eventBossTiers;
+    // Slice 8b — rotation tickAt copied at publish time so the
+    // hot path can compute a deterministic per-spawn promotion
+    // seed without dereferencing `_rotation` from a non-writer
+    // thread. 0 when no rotation is active.
+    uint64 tickAt = 0;
+};
+
 class TerrorZonesMgr
 {
 public:
@@ -607,11 +671,45 @@ public:
     { return _enabled && _innkeeperGossipEnable; }
     uint32 GetIntervalSec() const { return _intervalSec; }
     uint32 GetSlotCount() const { return _slotCount; }
+    // Server's configured max player level (TerrorZones.MaxPlayerLevel).
+    // Read by both TerrorZonesCombatMgr::ComputeTargetLevel and the
+    // event-boss loot band computation (TerrorZonesEventLoot.cpp), so it
+    // stays here rather than duplicating the config load in two places.
+    uint8 GetMaxPlayerLevel() const { return _maxPlayerLevel; }
 
     ActiveRotation GetActiveRotation() const;
     uint64 GetNextTickAt() const;
     std::vector<PoolEntry> GetPool() const;
     std::vector<HistoryTick> GetHistory(uint32 maxTicks) const;
+
+    // Lightweight lock-free snapshot accessors for TerrorZonesCombatMgr's
+    // hot paths -- unlike GetActiveRotation() (a by-value ActiveRotation
+    // copy, including per-slot std::string), these are a cheap atomic
+    // load + shared_ptr copy, matching what the original in-class hot
+    // path did before full decomposition split Combat out.
+    std::shared_ptr<ActiveRotation const> GetRotationSnapshot() const
+    { return std::atomic_load_explicit(&_rotationSnap, std::memory_order_acquire); }
+    std::shared_ptr<CombatHotState const> GetCombatHotSnapshot() const
+    { return std::atomic_load_explicit(&_combatHot, std::memory_order_acquire); }
+
+    // Read-only access to the event-forced-scale atomics that
+    // SpawnWorldBoss (TerrorZonesEventSpawn.cpp) sets/clears around a
+    // forced event-boss SummonCreature call. TerrorZonesCombatMgr's
+    // OnBeforeCreatureSelectLevel / OnAfterCreatureSelectLevel read these
+    // to bypass normal eligibility for that one spawn.
+    uint8 GetEventBossScaleOverride() const
+    { return _eventBossScaleOverride.load(std::memory_order_relaxed); }
+    bool IsEventBossSpawnPending() const
+    { return _eventBossSpawnPending.load(std::memory_order_relaxed); }
+    uint8 GetEventBossTierOverride() const
+    { return _eventBossTierOverride.load(std::memory_order_relaxed); }
+
+    // Shared bot-exclusion guard for every loop over
+    // sWorldSessionMgr->GetAllSessions() that's meant to reach only real,
+    // in-world human players (announcements, tracker-quest sweeps, level
+    // sampling for zone/tier selection). Returns null for a null session,
+    // a playerbot session, or a session with no live in-world player.
+    static Player* RealPlayerFromSession(WorldSession* session);
 
     bool IsZoneEmpowered(uint32 zoneId, std::string* outName,
                          uint32* outRemainingSec) const;
@@ -620,21 +718,9 @@ public:
     // rotation immediately. Announces.
     void ForceTick();
 
-    // Per-player pref cache.
-    void LoadPlayerPref(Player* player);
-    void FlushPlayerPref(Player* player);
-    void UnloadPlayerPref(ObjectGuid guid);
-    bool IsAnnounceEnabled(Player const* player) const;
-    void SetAnnounceEnabled(Player* player, bool enabled);
-
-    // Slice 7 — per-player category bitmask access. The bitmask
-    // composes with the global config mask + the master switch via
-    // IsCategoryEnabledFor; these helpers are for the
-    // `.zones announce` subcommand wiring.
-    uint8 GetAnnounceCategories(Player const* player) const;
-    void  SetAnnounceCategories(Player* player, uint8 mask);
-    uint8 GetGlobalAnnounceCategoryMask() const
-    { return _announceCategoryGlobal; }
+    // Per-player announcement preferences (load/flush/query/set, plus the
+    // three-input category gate) live in TerrorZonesPlayerPrefsMgr, a
+    // fully independent manager -- see TerrorZonesPlayerPrefsMgr.h.
 
     // Hooks called from PlayerScripts.
     void OnPlayerLogin(Player* player);
@@ -643,22 +729,16 @@ public:
     // Remaining-seconds helper for UI/chat formatting.
     uint32 RemainingSeconds(uint64 now = 0) const;
 
-    // --- Slice 2: combat scaling ---
-    bool IsScalingEnabled() const { return _enabled && _scalingEnabled; }
-
-    // Returns 0 when the zone isn't empowered (caller leaves baseline
-    // alone). Otherwise returns max(pool.level_max, highest-online-in-zone)
-    // — the target level mobs in that zone should scale to.
-    uint8 ComputeTargetLevel(uint32 zoneId) const;
-
-    // Eligibility predicate per SLICE_2_PLAN §6. Safe to call from the
-    // OnBeforeCreatureSelectLevel hook (creature's position is already
-    // set at that point, so faction and friendly checks are valid).
-    bool IsScalingEligible(Creature const* creature) const;
-
-    // OnBeforeCreatureSelectLevel entry point — mutates `level` in place
-    // when scaling applies.
-    void OnBeforeCreatureSelectLevel(Creature const* creature, uint8& level);
+    // Slice 2 scaling + Slice 8 combat difficulty (ComputeTargetLevel,
+    // IsScalingEligible, OnBeforeCreatureSelectLevel, WalkZoneRescale,
+    // OnAfterCreatureSelectLevel, OnUnitDealDamage, ApplyGroupHpScaling,
+    // OnCreatureKilled, and the Get*Mult/Get*Bonus/Get*Uplift readouts)
+    // are a fully independent manager -- see TerrorZonesCombatMgr.h. It
+    // reaches back into this Mgr via GetRotationSnapshot/
+    // GetCombatHotSnapshot/GetEventBossScaleOverride/
+    // IsEventBossSpawnPending/GetEventBossTierOverride/IsEventBossSpawn/
+    // TryGetSlotForZone/GetPool/IsDebug/RealPlayerFromSession -- all
+    // public accessors, nothing reaches into private state.
 
     // --- Slice 3: baseline rewards ---
     bool IsRewardsEnabled() const { return _enabled && _rewardsEnabled; }
@@ -684,58 +764,40 @@ public:
     // is disabled or the killer isn't in an empowered zone.
     void ApplyKillGoldFloor(Creature* killed, Player* killer);
 
-    // --- Slice 10 Pass 2: per-TZ contract + mailed reward ---
-    bool IsContractEnabled() const { return _enabled && _contractEnabled; }
+    // Per-TZ contract credit + mailed reward is a fully independent
+    // manager -- see TerrorZonesContractMgr.h. It reaches back into this
+    // Mgr (via IsEnabled/TryGetSlotForZone/IsScalingEligible/
+    // IsEventBossSpawn/IsClassDropEntryValid/AccrueTierTeleportCredit)
+    // exactly the way any other file in the module does, through public
+    // methods -- nothing reaches into private state across the boundary.
 
-    // Accrue contract credit for an eligible kill in an empowered zone.
-    // Write-through: upserts the per-(guid, rotation, zone) row in
-    // character_terror_zones_progress (capped), capturing the killer's
-    // level / class / spec / zone tier for the offline mail-out. Splits
-    // across the killer's group members standing in the same zone.
-    // Called from OnPlayerCreatureKill.
-    void AccrueContractCredit(Creature* killed, Player* killer);
-
-    // Settle + mail every unmailed contract whose rotation has ended
-    // (tick_at < beforeTickAt). Gold (+ optional archetype gear when
-    // credit clears the threshold) scaled by stored credit/tier, mailed
-    // to the character by guid (offline-safe), then the settled rows are
-    // deleted. Called from RunRotation once the new rotation is live.
-    void MailContractRewards(uint64 beforeTickAt);
-
-    // Current banked contract credit for (guid, zone) in the active
-    // rotation — used by `.zones` to show progress. DB-backed read.
-    uint32 GetContractCreditFor(uint32 guidLow, uint32 zoneId) const;
-
-    // --- Teleport unlock ---
-    bool IsTeleportEnabled() const { return _enabled && _teleportEnabled; }
-
-    // Cumulative (not rotation-scoped) credit toward the Tier-`tier`
-    // teleport unlock. Called alongside AccrueContractCredit for the same
-    // kill/credit — independent bucket, no rotation cap, never resets. On
-    // first crossing the configured threshold, grants the single
-    // multi-tier beacon item (if not already owned) and announces it.
-    void AccrueTierTeleportCredit(Player* player, uint8 tier, uint32 addCredit);
-
-    // Whether `player` has unlocked the Tier-`tier` teleport destination.
-    // In-session working copy of character_terror_zones_tier_progress —
-    // used by the beacon item's gossip menu to decide which tiers to list.
-    bool IsTierUnlockedFor(Player const* player, uint8 tier) const;
-
-    // Teleports `player` to whichever pool zone is currently empowered at
-    // `tier` in the active rotation. Sends a chat error and returns false
-    // if no slot is at that tier right now, or the zone has no configured
-    // landing point yet (tp_map unset). Called from the beacon item's
-    // gossip-select handler.
-    bool TeleportPlayerToTier(Player* player, uint8 tier);
-
-    void LoadTierTeleportProgress(Player* player);
-    void UnloadTierTeleportProgress(ObjectGuid guid);
+    // Teleport-unlock state (per-tier lifetime credit, unlock status, the
+    // beacon item grant) is a fully independent manager -- see
+    // TerrorZonesTeleportMgr.h. It reaches back into this Mgr
+    // (IsEnabled/GetActiveRotation/GetPool/IsDebug) through public
+    // methods only, and TerrorZonesContractMgr calls its
+    // AccrueTierTeleportCredit the same way any other file would.
 
     // Drop-quality tier bump. Returns true when `item->itemid` was
     // substituted for a higher-rarity template matching its level band.
     // Internally gates on empowerment, rewards-enabled, epic cap, and
-    // the configured roll chance.
+    // the configured roll chance. Substitution can't use the additive
+    // "bonus stack" trick TryGatheringYieldBump uses below (adding both
+    // the original AND the substituted item would double-drop), so this
+    // DOES mutate the shared LootStoreItem* template pointer -- paired
+    // with RevertTierBumps(), called once per top-level loot-template
+    // Process() via OnAfterLootTemplateProcess, which undoes every
+    // mutation made during that pass before the next one starts.
     bool TryTierBump(Player const* player, ::LootStoreItem* item);
+
+    // Restores every LootStoreItem::itemid mutated by TryTierBump during
+    // the current top-level Process() call to its true pre-pass value,
+    // then clears the pending-revert map. Must run after the WHOLE
+    // template tree has finished rolling (not just the top-level items)
+    // so every AddItem() call downstream of a bump still sees the
+    // substituted id; only the shared template itself is left clean for
+    // the next roll.
+    void RevertTierBumps();
 
     // Build the (quality, level-band) → itemId index used by TryTierBump.
     // Called once at OnStartup after the item template store is loaded.
@@ -798,21 +860,15 @@ public:
     bool   IsWeatherOverrideEnabled() const { return _flavorsEnabled && _flavorWeatherOverride; }
 
     // --- Slice 5: empowerment tiers ---
-    bool IsTierEnabled() const { return _enabled && _tierEnabled; }
+    // Tier weights, axis-roll config, IsTierEnabled/RollAxis/GetTierConfig
+    // are a fully independent manager -- see TerrorZonesTierMgr.h. It
+    // reaches back into this Mgr via IsEnabled/GetRotationSnapshot, both
+    // public accessors.
 
     // Copy-out a snapshot of the active slot for a given zone. Returns
     // false when the zone isn't empowered. The copy is safe to read
     // after the mutex releases (std::string + POD members).
     bool TryGetSlotForZone(uint32 zoneId, ActiveSlot& out) const;
-
-    // Evaluate one axis roll for a given slot (uses the slot's persisted
-    // flavor + tier + slotIndex together with the rotation's tickAt so
-    // every call for this rotation returns the same number).
-    float RollAxis(ActiveSlot const& slot, RewardAxis axis) const;
-
-    // Read-only access to the loaded tier config (used by /zones output
-    // + announcement helpers to render rolled values in the chat line).
-    TierRollConfig const& GetTierConfig() const { return _tierCfg; }
 
     // Force-set the active rotation's tier on every slot. Persists to
     // terror_zones_history.tier and DOES NOT re-apply atmosphere (tier
@@ -870,32 +926,13 @@ public:
     // creatures.
     void ApplyEventBossGoldUplift(Loot& loot, Player const* player);
 
-    // --- Slice 8: combat difficulty ---
-    bool IsCombatEnabled() const { return _enabled && _combatEnabled; }
-
-    // Post-SelectLevel HP mult entry point. Reads zone empowerment +
-    // eligibility + event-boss status, multiplies the creature's
-    // computed MaxHealth by `ComputeCombatHpMult(...)`. No-op when
-    // the creature isn't eligible or the zone isn't empowered.
-    void OnAfterCreatureSelectLevel(Creature* creature);
-
-    // Outgoing-damage mult entry point. Fires from the UnitScript
-    // OnDamage hook. Same predicate as the HP path — eligible
-    // attacker, empowered zone, event-boss bonus if indexed.
-    void OnUnitDealDamage(Unit* attacker, Unit* victim, uint32& damage);
-
-    // Slice 10 Pass 3 — engage-time group HP scaling (Model C). Fires
-    // from the same OnDamage hook for player→creature hits. On the first
-    // hit on a full-HP eligible empowered mob (tracked per rotation), if
-    // the attacker is grouped, multiplies the mob's max HP by
-    // GroupHpFactor(...) over the group's combined live EHP. Per-hit
-    // damage is unchanged. No-op for solo players / event bosses.
-    void ApplyGroupHpScaling(Unit* attacker, Unit* victim);
-
-    // Release a killed creature's guid from the group-scale tracking set
-    // so it re-scales on respawn within the same rotation. Called from
-    // OnPlayerCreatureKill.
-    void OnCreatureKilled(Creature* killed);
+    // O(1) event-boss-spawn membership test, keyed by the creature's raw
+    // guid. Exposed so TerrorZonesContractMgr can decide whether a killed
+    // creature's huge HP total is legitimately an event boss (which
+    // bypasses the normal scaling-eligibility check for contract credit)
+    // without reaching into `_eventBossSpawnIndex` directly.
+    bool IsEventBossSpawn(uint64 rawGuid) const
+    { return _eventBossSpawnIndex.count(rawGuid) > 0; }
 
     // Slice 8 Pass-2 loot-pool content load. Called from
     // InitializeOnStartup after LoadEventContent.
@@ -919,76 +956,21 @@ public:
     // TryEventBossDrop so it only fires on event-boss kills.
     bool TryClassDrop(Player const* player, Loot& loot);
 
-    // Read-only getters the `.zones` command uses to render the
-    // Difficulty sub-line without having to reach into private state.
-    float GetCombatHpMult() const { return _combatHpMult; }
-    float GetCombatDamageMult() const { return _combatDamageMult; }
-    float GetTierHpBonus(Tier t) const
-    {
-        if (t == TIER_NONE || t > TIER_MAX) return 1.0f;
-        return _tierHpBonus[t];
-    }
-    float GetTierDamageBonus(Tier t) const
-    {
-        if (t == TIER_NONE || t > TIER_MAX) return 1.0f;
-        return _tierDamageBonus[t];
-    }
-    float GetEventBossHpUplift() const { return _eventBossHpMultUplift; }
-    float GetEventBossDamageUplift() const { return _eventBossDamageMultUplift; }
-    uint32 GetEliteDensityPerMille(Tier t) const
-    {
-        if (t == TIER_NONE || t > TIER_MAX) return 0;
-        return _eliteDensityPerMille[t];
-    }
-    float GetEliteHpUplift() const { return _eliteHpMultUplift; }
-    float GetEliteDamageUplift() const { return _eliteDamageMultUplift; }
+    // Membership test against `_classDropEntries`, exposed so
+    // TerrorZonesContractMgr's mailed-gear roll can check a candidate
+    // (band, tier, archetype, slot) cell is actually populated before
+    // trying to create the item.
+    bool IsClassDropEntryValid(uint32 entry) const
+    { return _classDropEntries.count(entry) > 0; }
 
 private:
     TerrorZonesMgr() = default;
 
-    // Slice 8b cleanup — lock-free atomic-shared_ptr snapshots.
-    //
-    // Every writer in this module runs on the world thread (AC's
-    // single-threaded `MapUpdate.Threads = 1` model: rotation tick,
-    // event tick, creature SelectLevel, damage dispatch, loot
-    // mutation, player-script hooks, and command handlers all fire
-    // on the same thread). Writers therefore mutate the underlying
-    // mutable state (`_rotation`, `_activeEvents`,
-    // `_eventBossSpawnIndex`) directly, then publish a fresh
-    // immutable snapshot via the matching `Publish*Snap` helper.
-    //
-    // Readers atomic-load the snapshot and walk it without any
-    // synchronization. Stored as plain shared_ptrs accessed via the
-    // C++17 `std::atomic_load` / `std::atomic_store` free-function
-    // overloads — `std::atomic<std::shared_ptr<...>>` only landed in
-    // libstdc++ 12, but the free-function form is stable since C++11
-    // and the AC worldserver build image ships libstdc++ 11.
-    struct CombatHotState
-    {
-        struct SlotView
-        {
-            uint32 zoneId;
-            Tier   tier;
-        };
-        // Small — at most 4 slots per spec. Linear scan beats map
-        // lookup at this size.
-        std::vector<SlotView> slots;
-        // Event-boss GUID set for damage-path uplift membership
-        // check. Raw ObjectGuid values, same keying as
-        // `_eventBossSpawnIndex`.
-        std::unordered_set<uint64> eventBossGuids;
-        // Per-GUID tier captured at spawn time so damage scaling
-        // uses the boss's source rotation slot tier, not whatever
-        // tier the boss's current zone happens to have right now
-        // (which may differ from spawn time, or be empty if the
-        // boss is in a non-rotation zone).
-        std::unordered_map<uint64, Tier> eventBossTiers;
-        // Slice 8b — rotation tickAt copied at publish time so the
-        // hot path can compute a deterministic per-spawn promotion
-        // seed without dereferencing `_rotation` from a non-writer
-        // thread. 0 when no rotation is active.
-        uint64 tickAt = 0;
-    };
+    // CombatHotState is now declared at namespace scope (see above the
+    // class) so TerrorZonesCombatMgr can use it as an accessor return
+    // type. This member and its publisher (PublishCombatHot) stay here:
+    // building the snapshot is inherently a core responsibility (it's
+    // assembled from `_rotation` + event-boss state that core/events own).
     std::shared_ptr<CombatHotState const> _combatHot;
 
     // Slice 8b cleanup — broader read snapshots for reader paths
@@ -1031,6 +1013,12 @@ private:
     };
 
     void RunRotation(uint64 tickAt, bool announce);
+    // Continuation of RunRotation once the (possibly async) recency-history
+    // lookup has resolved. `recent` is the zone_id history rows fetched for
+    // the recency-dampening weight; empty if recency dampening is off.
+    void RunRotationContinued(uint64 tickAt, bool announce,
+                               std::vector<uint8> targets,
+                               std::vector<uint32> recent);
     void AnnounceRotation(ActiveRotation const& rot);
 
     // Slice 10 — shared empowered-zone loot-gold math, extracted from
@@ -1044,13 +1032,6 @@ private:
     // else the flat per-flavor boost, else 1.0). Shared by the multiply
     // path and the floor path so both read the same deterministic value.
     float EffectiveGoldRoll(ActiveSlot const& slot) const;
-
-    // Slice 7 — per-category gating helper. Compose `globalMask`,
-    // the player's master toggle, and the player's per-category
-    // bitmask. World-thread-only access to `_prefs`; no
-    // synchronization needed.
-    bool IsCategoryEnabledFor(Player const* player,
-                               AnnounceCategory cat) const;
 
     // Slice 7 — new fire paths. Each respects the category gate.
     void SendRotationEndingWarning(uint64 nextTickAt);
@@ -1096,10 +1077,6 @@ private:
     // no band matches or the pool is empty.
     LootPoolEntry const* FindEventBossLootBand(uint8 scaledLevel) const;
 
-    // Tick-edge zone walks. `edgeOn=true` when a zone newly becomes
-    // empowered; `edgeOn=false` when a zone leaves the empowered set.
-    void WalkZoneRescale(uint32 zoneId, bool edgeOn,
-                         bool force = false);
     void SendTickLineTo(Player* player, std::string const& zoneName,
                         uint32 remainingSec);
     void SendEntryLineTo(Player* player, std::string const& zoneName,
@@ -1126,17 +1103,14 @@ private:
     uint32 _weightOverlap = 30;
     uint32 _weightBelow = 10;
     uint32 _weightAbove = 1;
+    // Also read (independently) by TerrorZonesPlayerPrefsMgr's own
+    // LoadConfig for the per-player announce-preference default; kept
+    // here too because RunRotation uses it to decide whether a given
+    // tick announces server-wide at all.
     bool _announceServerWide = true;
     bool _announceStartupTick = true;
-    bool _announceZoneEntry = true;
     bool _startupForceTick = false;
 
-    // Slice 7 — per-category global bitmask, built from the eight
-    // `Announce.*` knobs (RotationTick, RotationEnding, RotationEnd,
-    // ZoneEntry, ZoneLeave, EventStart, EventEnding, EventEnd) at
-    // LoadConfig time. ServerWide / ZoneEntry are OR'd into the
-    // matching bits for backward compat.
-    uint8 _announceCategoryGlobal = ANNOUNCE_CATEGORY_ALL;
     uint32 _rotationEndingLeadSec = 300;
     uint32 _eventEndingLeadSec    = 300;
     static constexpr uint32 kAnnounceWindowSec = 30;
@@ -1145,22 +1119,15 @@ private:
     // fire after a fresh boot (subject to the missed-window guard).
     uint64 _lastRotationEndingWarnTickAt = 0;
 
-    // Slice 2 — scaling.
-    bool _scalingEnabled = true;
-    bool _scalingRescaleOnTick = true;
+    // Scaling-subsystem config (skip-lists, rescale gating, etc.) now
+    // lives in TerrorZonesCombatMgr. _maxPlayerLevel stays here since
+    // TerrorZonesEventLoot.cpp (still core) also reads it.
     // Server's max player level. Used as the mob-scaling ceiling
     // base in ComputeTargetLevelPure (final ceiling = max +
     // zoneTier). Configurable via TerrorZones.MaxPlayerLevel so
     // servers running a higher level cap (e.g. custom 85/90 caps)
     // can scale appropriately. 80 is the 3.3.5a retail cap.
     uint8 _maxPlayerLevel = 80;
-    bool _scalingSkipWorldBosses = true;
-    bool _scalingSkipFriendly = false;
-    // Player-level aggregate used to pick an empowered zone's mob level.
-    // false → median of real players in the zone (default); true → max.
-    // Set from TerrorZones.Scaling.PlayerLevelMetric (median|max).
-    bool _scalingUseMaxLevel = false;
-    std::unordered_set<uint32> _scalingNeverEntries;
 
     // Slice 3 — rewards.
     bool _rewardsEnabled = true;
@@ -1196,50 +1163,29 @@ private:
         _goldFloorTargets;
     uint64 _goldFloorTargetsClearedAt = 0;
 
-    // Slice 10 Pass 2 — per-TZ contract + mailed reward. Credit accrues
-    // write-through to character_terror_zones_progress on each eligible
-    // kill; the rotation-end mail-out reads that table (offline-safe).
-    bool   _contractEnabled              = true;
-    uint32 _contractCreditPerKillDivisor = 1000;  // credit = mobMaxHp / this
-    uint32 _contractCreditCapPerZone     = 3000;  // per player per zone/rotation
-    uint32 _contractGoldPerCreditCopper  = 30;    // gold = credit * this * tierMult
-    uint32 _contractGoldCapCopper        = 2000000;   // 200g ceiling per mail
-    uint32 _contractGearCreditThreshold  = 1500;  // min credit to roll mailed gear
-    // Per-tier gold multiplier for the mailed lump sum (index 0 = TIER_NONE).
-    float  _contractTierGoldMult[TIER_MAX + 1] =
-        {1.0f, 1.0f, 1.3f, 1.7f, 2.2f, 3.0f};
-    // Player-facing progress feedback.
-    bool   _contractAnnounceProgress   = true;
-    uint32 _contractProgressEveryCredit = 100;  // periodic "credit banked" line
+    // Contract credit + mailed reward state lives entirely in
+    // TerrorZonesContractMgr now (full decomposition).
 
-    // Messaging-only running credit per (guidLow<<32 | zoneId) for the
-    // current session/rotation. Drives the zone-entry / gear-threshold /
-    // periodic chat lines (the DB row is the reward source of truth; this
-    // is best-effort and reset each rotation tick). Not persisted.
-    std::unordered_map<uint64, uint32> _contractMsgCredit;
-
-    // --- Teleport unlock ---
-    bool   _teleportEnabled = true;
-    // Index by tier (1-5); [0] unused.
-    uint32 _teleportUnlockThreshold[TIER_MAX + 1] = {0, 800, 1200, 1800, 2600, 4000};
-    // Single multi-tier beacon item (entry id), granted once on first
-    // unlock. Its gossip menu lists whichever tiers _tierProgress marks
-    // unlocked — no per-tier item/spell needed.
-    uint32 _teleportItemEntry = 0;
-
-    struct TierProgress
-    {
-        uint32 lifetimeCredit = 0;
-        bool   unlocked = false;
-    };
-    // guidLow -> per-tier progress ([0] unused), loaded whole at login,
-    // erased at logout. character_terror_zones_tier_progress is the
-    // source of truth; this is just the in-session working copy.
-    std::unordered_map<uint32, std::array<TierProgress, TIER_MAX + 1>> _tierProgress;
+    // Teleport-unlock state lives entirely in TerrorZonesTeleportMgr now
+    // (full decomposition).
 
     // (quality << 8) | band → vector of itemIds. Built once at startup.
     std::unordered_map<uint32, std::vector<uint32>> _rarityIndex;
     bool _rarityIndexBuilt = false;
+
+    // TryTierBump's shared-template mutations, pending revert. Keyed by
+    // the LootStoreItem* pointer (into the process-lifetime shared
+    // LootTemplate::Entries list -- same pointer TryGatheringYieldBump's
+    // comment above warns about), value is the ORIGINAL itemid from
+    // before this pass's first bump of that pointer. try_emplace-only
+    // insert in TryTierBump means a pointer bumped twice in one
+    // Process() call (e.g. via a reference-template roll) still reverts
+    // to its true pre-pass original, not an intermediate bumped value.
+    // Cleared every time RevertTierBumps() runs (once per top-level
+    // Process() call, via OnAfterLootTemplateProcess -- see
+    // TerrorZonesRewardScripts.cpp), so it never accumulates across
+    // unrelated loot bundles.
+    std::unordered_map<LootStoreItem*, uint32> _tierBumpReverts;
 
     // Slice 4 — flavors.
     bool _flavorsEnabled = true;
@@ -1273,10 +1219,8 @@ private:
     std::unordered_set<uint64> _uniqueRolledBundles;
     uint64 _uniqueRolledBundlesClearedAt = 0;
 
-    // Slice 5 — tiers.
-    bool _tierEnabled = true;
-    uint32 _tierWeights[TIER_MAX] = {40, 30, 20, 8, 2};
-    TierRollConfig _tierCfg{};
+    // Slice 5 tier state (_tierEnabled/_tierWeights/_tierCfg) now lives
+    // independently in TerrorZonesTierMgr (full decomposition).
 
     // Slice 6 — dynamic events.
     bool _eventsEnabled = true;
@@ -1352,41 +1296,8 @@ private:
     // 0 means "no override" (treat as not set).
     std::atomic<uint8> _eventBossTierOverride{0};
 
-    // Slice 8 — combat difficulty. Applied post-SelectLevel (HP) +
-    // at outgoing damage dispatch. Per-tier HP bonus composes
-    // multiplicatively on top of the base mult; damage tier bonus is
-    // flat 1.0 by default per plan §2.2 but tunable. Event-boss
-    // uplift stacks on top when the attacker's GUID is in
-    // `_eventBossSpawnIndex`.
-    bool  _combatEnabled   = true;
-    float _combatHpMult    = 2.0f;
-    float _combatDamageMult = 1.3f;
-    float _tierHpBonus[TIER_MAX + 1]     = {1.0f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
-    float _tierDamageBonus[TIER_MAX + 1] = {1.0f, 1.0f, 1.0f,  1.0f, 1.0f,  1.0f};
-    float _eventBossHpMultUplift     = 4.0f;
-    float _eventBossDamageMultUplift = 1.75f;
-
-    // Slice 8b — elite density per tier. Per-mille values (0..1000)
-    // so the hot path can roll an integer mod-1000 instead of a
-    // float comparison. Default ladder: T1/T2 = 0 (no promotion),
-    // T3 = 150 (15%), T4 = 250 (25%), T5 = 400 (40%). Promoted
-    // spawns get an additional HP/damage uplift composed on top of
-    // the Slice 8 base × tier mult — feel is "1 in 4 mobs in this
-    // T4 zone hits like a truck."
-    uint32 _eliteDensityPerMille[TIER_MAX + 1] =
-        {0, 0, 0, 150, 250, 400};
-    float  _eliteHpMultUplift     = 1.5f;
-    float  _eliteDamageMultUplift = 1.3f;
-
-    // Slice 10 Pass 3 — engage-time group HP scaling (Model C).
-    bool   _groupScalingEnabled   = true;
-    float  _groupScalingDampen    = 0.75f;  // per extra-member-EHP weight
-    float  _groupScalingMaxFactor = 8.0f;   // HP-factor ceiling
-    // Creatures already group-scaled this rotation (raw ObjectGuid). A
-    // mob scales at most once per engagement; killing it releases the
-    // guid (OnCreatureKilled) so a respawn re-scales. Cleared each
-    // rotation tick. World-thread-only (combat + kill + tick all there).
-    std::unordered_set<uint64> _groupScaledGuids;
+    // Combat-difficulty + group-HP-scaling config and state now live in
+    // TerrorZonesCombatMgr (full decomposition).
 
     bool  _eventBossLootPoolEnabled      = true;
     float _eventBossLootPurpleMultiplier = 1.0f;
@@ -1431,28 +1342,14 @@ private:
     ActiveRotation _rotation;
     uint64 _nextTickAt = 0;
     uint32 _tickAccumMs = 0;
+    // Pumped every OnUpdate so the RunRotation recency-history lookup
+    // (RunRotationContinued) can run off the world thread instead of
+    // blocking it with a synchronous CharacterDatabase.Query.
+    QueryCallbackProcessor _queryProcessor;
     // Startup defer: on boot with a stale rotation window and no real
     // players online, hold off on picking zones until the first real
     // player logs in. Keeps targets=0 flat-random picks out of the pool.
     bool _rotationDeferredForFirstLogin = false;
-
-    struct PlayerPref
-    {
-        bool announceEnabled;
-        bool dirty;
-        bool loaded;
-        // Slice 7 — per-category bitmask. Defaults to 0xFF when the row
-        // is missing (never opted out of any category).
-        uint8 announceCategories = ANNOUNCE_CATEGORY_ALL;
-        // Slice 7 — last empowered zone the player was tracked in. Used
-        // to fire the zone-leave line on UpdateZone since AC's
-        // `OnPlayerUpdateZone(player, newZone, newArea)` doesn't carry
-        // the prior zone. In-memory only (no DB persistence) — the
-        // entry path on login re-establishes it.
-        uint32 lastEmpoweredZoneId = 0;
-        std::string lastEmpoweredZoneName;
-    };
-    std::unordered_map<uint32 /*guidLow*/, PlayerPref> _prefs;
 };
 
 // Slice 9 Pass 1 — class-targeted event-boss drops. 5 playstyle

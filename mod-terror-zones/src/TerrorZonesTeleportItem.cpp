@@ -5,6 +5,7 @@
 // so there's no per-tier item (or spell) to hijack/maintain.
 
 #include "TerrorZonesMgr.h"
+#include "TerrorZonesTeleportMgr.h"
 
 #include "Chat.h"
 #include "Item.h"
@@ -48,7 +49,7 @@ namespace
                 player->RemoveSpellCooldown(donorSpell->Id, true);
             }
 
-            auto& mgr = TerrorZonesMgr::Instance();
+            auto& mgr = TerrorZonesTeleportMgr::Instance();
             ClearGossipMenuFor(player);
 
             bool any = false;
@@ -78,7 +79,7 @@ namespace
         void OnGossipSelect(Player* player, Item* /*item*/, uint32 /*sender*/, uint32 action) override
         {
             CloseGossipMenuFor(player);
-            TerrorZonesMgr::Instance().TeleportPlayerToTier(
+            TerrorZonesTeleportMgr::Instance().TeleportPlayerToTier(
                 player, static_cast<uint8>(action));
         }
     };

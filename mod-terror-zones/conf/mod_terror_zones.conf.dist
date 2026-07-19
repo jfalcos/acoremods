@@ -899,9 +899,17 @@ TerrorZones.Combat.TierDamageBonus.T4 = 2.70
 TerrorZones.Combat.TierDamageBonus.T5 = 3.50
 
 #
-#    Event-boss uplift. Composes on top of Combat.{Hp,Damage}Mult AND the
-#    per-tier bonus. At defaults: a T3 event boss ends up at
-#    2.0 * 1.5 * 4.0 = 12.0x native HP, with 1.3 * 1.75 = 2.28x damage.
+#    Event-boss uplift. Composes multiplicatively on top of
+#    Combat.{Hp,Damage}Mult AND the per-tier bonus:
+#        total_hp_mult     = Combat.HpMult     * TierHpBonus.T{n}     * EventBoss.HpMult
+#        total_damage_mult = Combat.DamageMult * TierDamageBonus.T{n} * EventBoss.DamageMult
+#    Deliberately left as a formula rather than a worked example — a
+#    hardcoded number here drifts out of sync the next time TierHpBonus /
+#    TierDamageBonus get retuned (as happened previously: this comment
+#    once read "a T3 event boss ends up at 2.0 * 1.5 * 4.0 = 12.0x HP",
+#    computed against a pre-recalibration TierHpBonus.T3 of 1.5 — with
+#    the live T3 values above (HpMult=2.0, TierHpBonus.T3=3.50,
+#    EventBoss.HpMult=4.0) the real multiplier is 28.0x HP, not 12.0x).
 #    This is the knob that makes event world bosses feel like world bosses
 #    without mutating creature_template.rank or touching worldserver's
 #    Rate.Creature.Elite.* knobs.

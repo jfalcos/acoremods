@@ -6,9 +6,10 @@
 // Slice 8 — post-SelectLevel HP mult + outgoing damage mult live
 // here too (OnAfterCreatureSelectLevel, OnUnitDealDamage). Same
 // eligibility predicate as Slice 2 level scaling.
-
+#include "TerrorZonesCombatMgr.h"
 #include "TerrorZonesMgr.h"
 
+#include "Config.h"
 #include "Creature.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
@@ -24,18 +25,205 @@
 #include "WorldSession.h"
 #include "WorldSessionMgr.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <ctime>
 #include <limits>
+#include <sstream>
 
 namespace mod_terror_zones
 {
 
-uint8 TerrorZonesMgr::ComputeTargetLevel(uint32 zoneId) const
+TerrorZonesCombatMgr& TerrorZonesCombatMgr::Instance()
 {
-    if (!_enabled || !_scalingEnabled || zoneId == 0)
+    static TerrorZonesCombatMgr inst;
+    return inst;
+}
+
+void TerrorZonesCombatMgr::LoadConfig()
+{
+    _scalingEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Scaling.Enable", true);
+    _scalingRescaleOnTick = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Scaling.RescaleOnTick", true);
+    _scalingSkipWorldBosses = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Scaling.SkipWorldBosses", true);
+    _scalingSkipFriendly = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Scaling.SkipFriendly", false);
+    {
+        std::string metric = sConfigMgr->GetOption<std::string>(
+            "TerrorZones.Scaling.PlayerLevelMetric", "median");
+        for (char& ch : metric)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        _scalingUseMaxLevel = (metric == "max");
+    }
+
+    _scalingNeverEntries.clear();
+    {
+        std::string csv = sConfigMgr->GetOption<std::string>(
+            "TerrorZones.Scaling.NeverScaleEntries", "");
+        std::stringstream ss(csv);
+        std::string token;
+        while (std::getline(ss, token, ','))
+        {
+            while (!token.empty() && std::isspace(static_cast<unsigned char>(token.front())))
+                token.erase(token.begin());
+            while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back())))
+                token.pop_back();
+            if (token.empty())
+                continue;
+            long v = std::strtol(token.c_str(), nullptr, 10);
+            if (v > 0)
+                _scalingNeverEntries.insert(static_cast<uint32>(v));
+        }
+    }
+
+    // AC env-var translation note: a config key like
+    // `TerrorZones.Combat.TierHpBonus.T1` becomes env
+    // `AC_TERROR_ZONES_COMBAT_TIER_HP_BONUS_T_1` — single underscore
+    // at the letter→digit boundary (`T1` → `T_1`). Matches the
+    // Slice-5 tier-bonus keys.
+    _combatEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Combat.Enable", true);
+    _combatHpMult = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.HpMult", 2.0f);
+    if (_combatHpMult < 0.1f) _combatHpMult = 0.1f;
+    _combatDamageMult = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.DamageMult", 1.3f);
+    if (_combatDamageMult < 0.1f) _combatDamageMult = 0.1f;
+
+    _tierHpBonus[TIER_NONE] = 1.0f;  // sentinel — no tier rolled
+    _tierHpBonus[TIER_1] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierHpBonus.T1", 1.0f);
+    _tierHpBonus[TIER_2] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierHpBonus.T2", 1.25f);
+    _tierHpBonus[TIER_3] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierHpBonus.T3", 1.5f);
+    _tierHpBonus[TIER_4] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierHpBonus.T4", 1.75f);
+    _tierHpBonus[TIER_5] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierHpBonus.T5", 2.0f);
+
+    _tierDamageBonus[TIER_NONE] = 1.0f;
+    _tierDamageBonus[TIER_1] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierDamageBonus.T1", 1.0f);
+    _tierDamageBonus[TIER_2] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierDamageBonus.T2", 1.0f);
+    _tierDamageBonus[TIER_3] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierDamageBonus.T3", 1.0f);
+    _tierDamageBonus[TIER_4] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierDamageBonus.T4", 1.0f);
+    _tierDamageBonus[TIER_5] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.TierDamageBonus.T5", 1.0f);
+
+    _eventBossHpMultUplift = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.EventBoss.HpMult", 4.0f);
+    if (_eventBossHpMultUplift < 0.1f) _eventBossHpMultUplift = 0.1f;
+    _eventBossDamageMultUplift = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.EventBoss.DamageMult", 1.75f);
+    if (_eventBossDamageMultUplift < 0.1f) _eventBossDamageMultUplift = 0.1f;
+
+    // Slice 8b — elite density per tier. Per-tier % of eligible spawns
+    // promoted to "elite-feel" (extra HP + damage on top of the Slice 8
+    // base × tier mult). T1/T2 default to 0 — only T3+ rotations carry
+    // the texture.
+    auto loadDensity = [&](char const* key, uint32 def) -> uint32 {
+        uint32 raw = sConfigMgr->GetOption<uint32>(key, def);
+        if (raw > 1000) raw = 1000;
+        return raw;
+    };
+    _eliteDensityPerMille[TIER_NONE] = 0;
+    _eliteDensityPerMille[TIER_1] = loadDensity(
+        "TerrorZones.Combat.EliteDensity.T1", 0);
+    _eliteDensityPerMille[TIER_2] = loadDensity(
+        "TerrorZones.Combat.EliteDensity.T2", 0);
+    _eliteDensityPerMille[TIER_3] = loadDensity(
+        "TerrorZones.Combat.EliteDensity.T3", 150);
+    _eliteDensityPerMille[TIER_4] = loadDensity(
+        "TerrorZones.Combat.EliteDensity.T4", 250);
+    _eliteDensityPerMille[TIER_5] = loadDensity(
+        "TerrorZones.Combat.EliteDensity.T5", 400);
+    _eliteHpMultUplift = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.Elite.HpMult", 1.5f);
+    if (_eliteHpMultUplift < 1.0f) _eliteHpMultUplift = 1.0f;
+    _eliteDamageMultUplift = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.Elite.DamageMult", 1.3f);
+    if (_eliteDamageMultUplift < 1.0f) _eliteDamageMultUplift = 1.0f;
+
+    // Slice 10 Pass 3 — group HP scaling.
+    _groupScalingEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Combat.GroupScaling.Enable", true);
+    _groupScalingDampen = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.GroupScaling.Dampen", 0.75f);
+    if (_groupScalingDampen < 0.0f) _groupScalingDampen = 0.0f;
+    _groupScalingMaxFactor = sConfigMgr->GetOption<float>(
+        "TerrorZones.Combat.GroupScaling.MaxFactor", 8.0f);
+    if (_groupScalingMaxFactor < 1.0f) _groupScalingMaxFactor = 1.0f;
+
+    LOG_INFO("module",
+             "mod-terror-zones: scaling enable={}, rescale_on_tick={}, "
+             "skip_bosses={}, skip_friendly={}, never_entries={}, "
+             "player_level_metric={}",
+             _scalingEnabled, _scalingRescaleOnTick,
+             _scalingSkipWorldBosses, _scalingSkipFriendly,
+             static_cast<uint32>(_scalingNeverEntries.size()),
+             _scalingUseMaxLevel ? "max" : "median");
+    LOG_INFO("module",
+             "mod-terror-zones: combat enable={} hp_mult={:.2f} "
+             "damage_mult={:.2f} "
+             "tier_hp_bonus=[T1={:.2f} T2={:.2f} T3={:.2f} T4={:.2f} T5={:.2f}] "
+             "event_boss=[hp=x{:.2f} dmg=x{:.2f}] "
+             "elite_density_pm=[T1={} T2={} T3={} T4={} T5={}] "
+             "elite_uplift=[hp=x{:.2f} dmg=x{:.2f}] "
+             "group_scaling enable={} dampen={:.2f} max_factor={:.2f}",
+             _combatEnabled, _combatHpMult, _combatDamageMult,
+             _tierHpBonus[TIER_1], _tierHpBonus[TIER_2],
+             _tierHpBonus[TIER_3], _tierHpBonus[TIER_4],
+             _tierHpBonus[TIER_5],
+             _eventBossHpMultUplift, _eventBossDamageMultUplift,
+             _eliteDensityPerMille[TIER_1], _eliteDensityPerMille[TIER_2],
+             _eliteDensityPerMille[TIER_3], _eliteDensityPerMille[TIER_4],
+             _eliteDensityPerMille[TIER_5],
+             _eliteHpMultUplift, _eliteDamageMultUplift,
+             _groupScalingEnabled, _groupScalingDampen, _groupScalingMaxFactor);
+}
+
+bool TerrorZonesCombatMgr::IsScalingEnabled() const
+{
+    return TerrorZonesMgr::Instance().IsEnabled() && _scalingEnabled;
+}
+
+bool TerrorZonesCombatMgr::IsCombatEnabled() const
+{
+    return TerrorZonesMgr::Instance().IsEnabled() && _combatEnabled;
+}
+
+float TerrorZonesCombatMgr::GetTierHpBonus(Tier t) const
+{
+    if (t == TIER_NONE || t > TIER_MAX) return 1.0f;
+    return _tierHpBonus[t];
+}
+
+float TerrorZonesCombatMgr::GetTierDamageBonus(Tier t) const
+{
+    if (t == TIER_NONE || t > TIER_MAX) return 1.0f;
+    return _tierDamageBonus[t];
+}
+
+uint32 TerrorZonesCombatMgr::GetEliteDensityPerMille(Tier t) const
+{
+    if (t == TIER_NONE || t > TIER_MAX) return 0;
+    return _eliteDensityPerMille[t];
+}
+
+uint8 TerrorZonesCombatMgr::ComputeTargetLevel(uint32 zoneId) const
+{
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
+    if (!core.IsEnabled() || !_scalingEnabled || zoneId == 0)
         return 0;
 
-    auto rot = std::atomic_load_explicit(&_rotationSnap,
-                                          std::memory_order_acquire);
+    auto rot = core.GetRotationSnapshot();
     bool inRotation = false;
     Tier tier = TIER_NONE;
     if (rot)
@@ -56,9 +244,14 @@ uint8 TerrorZonesMgr::ComputeTargetLevel(uint32 zoneId) const
     // Zone's natural level range from the TZ pool — the floor for
     // mob scaling so a zone never reads below its natural minimum.
     uint8 zoneMin = 0;
-    auto poolIt = _poolIndex.find(zoneId);
-    if (poolIt != _poolIndex.end() && poolIt->second < _pool.size())
-        zoneMin = static_cast<uint8>(_pool[poolIt->second].levelMin);
+    for (PoolEntry const& entry : core.GetPool())
+    {
+        if (entry.zoneId == zoneId)
+        {
+            zoneMin = static_cast<uint8>(entry.levelMin);
+            break;
+        }
+    }
     uint8 tierVal = (tier >= TIER_1 && tier <= TIER_5)
         ? static_cast<uint8>(tier) : 0;
 
@@ -83,11 +276,8 @@ uint8 TerrorZonesMgr::ComputeTargetLevel(uint32 zoneId) const
         sWorldSessionMgr->GetAllSessions();
     for (auto const& kv : sessions)
     {
-        WorldSession* session = kv.second;
-        if (!session || session->IsBot())
-            continue;
-        Player* p = session->GetPlayer();
-        if (!p || !p->IsInWorld())
+        Player* p = TerrorZonesMgr::RealPlayerFromSession(kv.second);
+        if (!p)
             continue;
         // A GM actively in GM mode (.gm on) is here as staff, not as a
         // participant — don't let their level skew the zone target. A GM
@@ -105,10 +295,10 @@ uint8 TerrorZonesMgr::ComputeTargetLevel(uint32 zoneId) const
 
     return ComputeTargetLevelPure(inRotation, agg,
                                    zoneMin, tierVal,
-                                   _maxPlayerLevel);
+                                   core.GetMaxPlayerLevel());
 }
 
-bool TerrorZonesMgr::IsScalingEligible(Creature const* creature) const
+bool TerrorZonesCombatMgr::IsScalingEligible(Creature const* creature) const
 {
     if (!creature)
         return false;
@@ -159,10 +349,11 @@ bool TerrorZonesMgr::IsScalingEligible(Creature const* creature) const
     return true;
 }
 
-void TerrorZonesMgr::OnBeforeCreatureSelectLevel(Creature const* creature,
-                                                 uint8& level)
+void TerrorZonesCombatMgr::OnBeforeCreatureSelectLevel(Creature const* creature,
+                                                        uint8& level)
 {
-    if (!_enabled || !_scalingEnabled || !creature)
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
+    if (!core.IsEnabled() || !_scalingEnabled || !creature)
         return;
 
     // Slice 6 — event-boss forced scale. SpawnWorldBoss sets the
@@ -173,11 +364,10 @@ void TerrorZonesMgr::OnBeforeCreatureSelectLevel(Creature const* creature,
     // always scale, even in zones that aren't currently empowered
     // (GM force-fire) and even when the creature_template carries
     // CREATURE_TYPE_FLAG_BOSS_MOB (iconic elites often do).
-    if (uint8 override = _eventBossScaleOverride.load(
-            std::memory_order_relaxed))
+    if (uint8 override = core.GetEventBossScaleOverride())
     {
         uint8 outLevel = ApplyScaling(level, override);
-        if (_debug && outLevel != level)
+        if (core.IsDebug() && outLevel != level)
             LOG_INFO("module",
                      "mod-terror-zones: event-boss forced scale "
                      "entry={} from={} to={}",
@@ -197,7 +387,7 @@ void TerrorZonesMgr::OnBeforeCreatureSelectLevel(Creature const* creature,
     if (outLevel == level)
         return;
 
-    if (_debug)
+    if (core.IsDebug())
         LOG_INFO("module",
                  "mod-terror-zones: scaled creature entry={} guid={} zone={} "
                  "from={} to={}",
@@ -218,16 +408,15 @@ void TerrorZonesMgr::OnBeforeCreatureSelectLevel(Creature const* creature,
 // eligible — edge-off tick walks land each creature back at native
 // HP through this same path (SelectLevel re-runs, snapshot doesn't
 // contain the zone, mult stays 1.0).
-void TerrorZonesMgr::OnAfterCreatureSelectLevel(Creature* creature)
+void TerrorZonesCombatMgr::OnAfterCreatureSelectLevel(Creature* creature)
 {
-    if (!_enabled || !_combatEnabled || !creature)
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
+    if (!core.IsEnabled() || !_combatEnabled || !creature)
         return;
 
     // Lock-free hot-path read. Publisher side has already built the
     // immutable snapshot; we just grab the shared_ptr.
-    std::shared_ptr<CombatHotState const> hot =
-        std::atomic_load_explicit(&_combatHot,
-                                   std::memory_order_acquire);
+    std::shared_ptr<CombatHotState const> hot = core.GetCombatHotSnapshot();
     if (!hot || hot->slots.empty())
         return;
 
@@ -245,8 +434,7 @@ void TerrorZonesMgr::OnAfterCreatureSelectLevel(Creature* creature)
     // GUID has been published into `eventBossGuids`.
     uint64 rawGuid = creature->GetGUID().GetRawValue();
     bool isEventBoss = hot->eventBossGuids.count(rawGuid) > 0
-                    || _eventBossSpawnPending.load(
-                            std::memory_order_relaxed);
+                    || core.IsEventBossSpawnPending();
 
     Tier tier = TIER_NONE;
     bool zoneMatch = false;
@@ -265,8 +453,7 @@ void TerrorZonesMgr::OnAfterCreatureSelectLevel(Creature* creature)
     // where the boss happens to be standing.
     if (isEventBoss)
     {
-        uint8 ovr = _eventBossTierOverride.load(
-            std::memory_order_relaxed);
+        uint8 ovr = core.GetEventBossTierOverride();
         if (ovr >= TIER_1 && ovr <= TIER_5)
         {
             tier = static_cast<Tier>(ovr);
@@ -337,7 +524,7 @@ void TerrorZonesMgr::OnAfterCreatureSelectLevel(Creature* creature)
     uint32 actualMaxHp = creature->GetMaxHealth();
     uint32 actualHp = creature->GetHealth();
 
-    if (_debug)
+    if (core.IsDebug())
         LOG_INFO("module",
                  "mod-terror-zones: combat HP mult entry={} guid={} zone={} "
                  "tier={} event_boss={} promoted={} mult=x{:.2f} from={} to={} "
@@ -357,19 +544,18 @@ void TerrorZonesMgr::OnAfterCreatureSelectLevel(Creature* creature)
 // every damage dispatch (melee + spell + DoT) — hundreds of calls
 // per second during combat. MUST be fully lock-free; reads the
 // same atomic snapshot the HP hook uses.
-void TerrorZonesMgr::OnUnitDealDamage(Unit* attacker, Unit* /*victim*/,
-                                       uint32& damage)
+void TerrorZonesCombatMgr::OnUnitDealDamage(Unit* attacker, Unit* /*victim*/,
+                                             uint32& damage)
 {
-    if (!_enabled || !_combatEnabled || !attacker || damage == 0)
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
+    if (!core.IsEnabled() || !_combatEnabled || !attacker || damage == 0)
         return;
 
     Creature const* c = attacker->ToCreature();
     if (!c)
         return;
 
-    std::shared_ptr<CombatHotState const> hot =
-        std::atomic_load_explicit(&_combatHot,
-                                   std::memory_order_acquire);
+    std::shared_ptr<CombatHotState const> hot = core.GetCombatHotSnapshot();
     if (!hot || hot->slots.empty())
         return;
 
@@ -426,10 +612,11 @@ void TerrorZonesMgr::OnUnitDealDamage(Unit* attacker, Unit* /*victim*/,
     damage = static_cast<uint32>(scaled);
 }
 
-void TerrorZonesMgr::WalkZoneRescale(uint32 zoneId, bool edgeOn,
-                                      bool force)
+void TerrorZonesCombatMgr::WalkZoneRescale(uint32 zoneId, bool edgeOn,
+                                            bool force)
 {
-    if (!_enabled || !_scalingEnabled)
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
+    if (!core.IsEnabled() || !_scalingEnabled)
         return;
     // `_scalingRescaleOnTick` gates the auto-tick edge rescale; GM
     // commands like `.zones settier` pass force=true to bypass.
@@ -475,15 +662,29 @@ void TerrorZonesMgr::WalkZoneRescale(uint32 zoneId, bool edgeOn,
              zoneId, edgeOn ? "on" : "off", walked, scaled);
 }
 
+void TerrorZonesCombatMgr::WalkZoneRescaleDebounced(uint32 zoneId,
+                                                     bool edgeOn, bool force)
+{
+    uint64 now = static_cast<uint64>(::time(nullptr));
+    auto it = _zoneRescaleDebounceAt.find(zoneId);
+    if (it != _zoneRescaleDebounceAt.end()
+        && now - it->second < kZoneRescaleDebounceSec)
+        return;  // recently walked this zone — skip the repeat
+
+    _zoneRescaleDebounceAt[zoneId] = now;
+    WalkZoneRescale(zoneId, edgeOn, force);
+}
+
 // Slice 10 Pass 3 — engage-time group HP scaling (Model C). Fires from
 // the UnitScript OnDamage hook for every damage event; fast-rejects all
 // but the first player hit on a fresh, eligible, empowered-zone mob. When
 // the engaging player is grouped, the mob's max HP is multiplied by the
 // group's combined-EHP factor so the fight stays per-capita challenging.
 // Per-hit damage is left to the Slice 8 path (unchanged).
-void TerrorZonesMgr::ApplyGroupHpScaling(Unit* attacker, Unit* victim)
+void TerrorZonesCombatMgr::ApplyGroupHpScaling(Unit* attacker, Unit* victim)
 {
-    if (!_enabled || !_combatEnabled || !_groupScalingEnabled)
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
+    if (!core.IsEnabled() || !_combatEnabled || !_groupScalingEnabled)
         return;
     if (!attacker || !victim)
         return;
@@ -509,9 +710,9 @@ void TerrorZonesMgr::ApplyGroupHpScaling(Unit* attacker, Unit* victim)
 
     uint32 zoneId = c->GetZoneId();
     ActiveSlot slot;
-    if (!TryGetSlotForZone(zoneId, slot))
+    if (!core.TryGetSlotForZone(zoneId, slot))
         return;  // not empowered
-    if (_eventBossSpawnIndex.count(rawGuid))
+    if (core.IsEventBossSpawn(rawGuid))
         return;  // event bosses own their scaling
     if (!IsScalingEligible(c))
         return;
@@ -566,7 +767,7 @@ void TerrorZonesMgr::ApplyGroupHpScaling(Unit* attacker, Unit* victim)
     c->SetMaxHealth(newHp);
     c->SetHealth(newHp);
 
-    if (_debug)
+    if (core.IsDebug())
         LOG_INFO("module",
                  "mod-terror-zones: group HP scale entry={} guid={} zone={} "
                  "members={} tapper_ehp={} sum_other_ehp={} factor=x{:.2f} "
@@ -575,7 +776,7 @@ void TerrorZonesMgr::ApplyGroupHpScaling(Unit* attacker, Unit* victim)
                  members, tapperEhp, sumOther, factor, baseHp, newHp);
 }
 
-void TerrorZonesMgr::OnCreatureKilled(Creature* killed)
+void TerrorZonesCombatMgr::OnCreatureKilled(Creature* killed)
 {
     if (killed)
         _groupScaledGuids.erase(killed->GetGUID().GetRawValue());

@@ -7,10 +7,14 @@
 // (gold + an optional archetype gear piece) to each character by guid —
 // offline-safe, since the table (not live player state) is the source of
 // truth — and deletes the settled rows.
-
+#include "TerrorZonesCombatMgr.h"
+#include "TerrorZonesContractMgr.h"
 #include "TerrorZonesMgr.h"
+#include "TerrorZonesPlayerPrefsMgr.h"
+#include "TerrorZonesTeleportMgr.h"
 
 #include "Chat.h"
+#include "Config.h"
 #include "Creature.h"
 #include "DatabaseEnv.h"
 #include "Field.h"
@@ -34,10 +38,59 @@
 namespace mod_terror_zones
 {
 
-void TerrorZonesMgr::AccrueContractCredit(Creature* killed, Player* killer)
+TerrorZonesContractMgr& TerrorZonesContractMgr::Instance()
 {
-    if (!IsContractEnabled() || !killed || !killer || !killer->IsInWorld())
+    static TerrorZonesContractMgr inst;
+    return inst;
+}
+
+void TerrorZonesContractMgr::LoadConfig()
+{
+    _contractEnabled = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Contract.Enable", true);
+    _contractCreditPerKillDivisor = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.CreditPerKillDivisor", 1000);
+    if (_contractCreditPerKillDivisor == 0)
+        _contractCreditPerKillDivisor = 1;
+    _contractCreditCapPerZone = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.CreditCapPerZone", 3000);
+    _contractGoldPerCreditCopper = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.GoldPerCreditCopper", 30);
+    _contractGoldCapCopper = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.GoldCapCopper", 2000000);
+    _contractGearCreditThreshold = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.GearCreditThreshold", 1500);
+    _contractTierGoldMult[TIER_1] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T1", 1.0f);
+    _contractTierGoldMult[TIER_2] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T2", 1.3f);
+    _contractTierGoldMult[TIER_3] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T3", 1.7f);
+    _contractTierGoldMult[TIER_4] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T4", 2.2f);
+    _contractTierGoldMult[TIER_5] = sConfigMgr->GetOption<float>(
+        "TerrorZones.Contract.TierGoldMult.T5", 3.0f);
+    _contractTierGoldMult[TIER_NONE] = _contractTierGoldMult[TIER_1];
+    for (uint32 i = 0; i <= TIER_MAX; ++i)
+        if (_contractTierGoldMult[i] < 0.0f)
+            _contractTierGoldMult[i] = 0.0f;
+    _contractAnnounceProgress = sConfigMgr->GetOption<bool>(
+        "TerrorZones.Contract.AnnounceProgress", true);
+    _contractProgressEveryCredit = sConfigMgr->GetOption<uint32>(
+        "TerrorZones.Contract.ProgressEveryCredit", 100);
+}
+
+bool TerrorZonesContractMgr::IsEnabled() const
+{
+    return TerrorZonesMgr::Instance().IsEnabled() && _contractEnabled;
+}
+
+void TerrorZonesContractMgr::AccrueContractCredit(Creature* killed, Player* killer)
+{
+    if (!IsEnabled() || !killed || !killer || !killer->IsInWorld())
         return;
+
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
 
     // Bots farm empowered zones constantly — they must not bank contract
     // credit or receive bounty mail. Exclude the killer here; bot group
@@ -48,18 +101,17 @@ void TerrorZonesMgr::AccrueContractCredit(Creature* killed, Player* killer)
 
     uint32 zoneId = killer->GetZoneId();
     ActiveSlot slot;
-    if (!TryGetSlotForZone(zoneId, slot))
+    if (!core.TryGetSlotForZone(zoneId, slot))
         return;  // not an empowered zone — no contract
 
     // Event bosses (huge HP) count too; otherwise require the same
     // eligibility the level-scaler uses so critters / pets / friendlies
     // don't accrue credit.
-    bool isEventBoss =
-        _eventBossSpawnIndex.count(killed->GetGUID().GetRawValue()) > 0;
-    if (!isEventBoss && !IsScalingEligible(killed))
+    bool isEventBoss = core.IsEventBossSpawn(killed->GetGUID().GetRawValue());
+    if (!isEventBoss && !TerrorZonesCombatMgr::Instance().IsScalingEligible(killed))
         return;
 
-    uint64 tickAt = _rotation.tickAt;
+    uint64 tickAt = core.GetActiveRotation().tickAt;
     if (tickAt == 0)
         return;
 
@@ -75,13 +127,18 @@ void TerrorZonesMgr::AccrueContractCredit(Creature* killed, Player* killer)
 
     // Zone display name for the player-facing progress lines.
     std::string zoneName;
+    for (PoolEntry const& entry : core.GetPool())
     {
-        auto pit = _poolIndex.find(zoneId);
-        if (pit != _poolIndex.end() && pit->second < _pool.size())
-            zoneName = _pool[pit->second].displayName;
-        if (zoneName.empty())
-            zoneName = std::to_string(zoneId);
+        if (entry.zoneId == zoneId)
+        {
+            zoneName = entry.displayName;
+            break;
+        }
     }
+    if (zoneName.empty())
+        zoneName = std::to_string(zoneId);
+
+    bool debug = core.IsDebug();
 
     // Upsert one recipient's row, capturing class / spec / level / tier so
     // the offline mail-out can resolve the gear entry without the player.
@@ -109,7 +166,7 @@ void TerrorZonesMgr::AccrueContractCredit(Creature* killed, Player* killer)
         // Independent, cumulative (not rotation-scoped) bucket feeding the
         // permanent Tier-N teleport-spell unlock — same credit, separate
         // ledger, never capped/reset by the rotation.
-        AccrueTierTeleportCredit(p, tierVal, addCredit);
+        TerrorZonesTeleportMgr::Instance().AccrueTierTeleportCredit(p, tierVal, addCredit);
 
         // Best-effort session-running total for progress chat (the DB row
         // is the reward source of truth; this drives the player-facing
@@ -120,14 +177,15 @@ void TerrorZonesMgr::AccrueContractCredit(Creature* killed, Player* killer)
         uint32 after = std::min<uint32>(before + addCredit, capVal);
         _contractMsgCredit[key] = after;
 
-        if (_debug)
+        if (debug)
             LOG_INFO("module",
                      "mod-terror-zones: contract credit +{} (now {} / cap {}) "
                      "guid={} zone={} tier={}",
                      addCredit, after, capVal, guidLow, zoneId,
                      static_cast<uint32>(tierVal));
 
-        if (!_contractAnnounceProgress || !IsAnnounceEnabled(p))
+        if (!_contractAnnounceProgress
+            || !TerrorZonesPlayerPrefsMgr::Instance().IsAnnounceEnabled(p))
             return;
         ChatHandler ch(p->GetSession());
         // First credit this rotation in this zone — explain the contract.
@@ -164,10 +222,13 @@ void TerrorZonesMgr::AccrueContractCredit(Creature* killed, Player* killer)
     }
 }
 
-void TerrorZonesMgr::MailContractRewards(uint64 beforeTickAt)
+void TerrorZonesContractMgr::MailContractRewards(uint64_t beforeTickAt)
 {
-    if (!IsContractEnabled() || beforeTickAt == 0)
+    if (!IsEnabled() || beforeTickAt == 0)
         return;
+
+    TerrorZonesMgr& core = TerrorZonesMgr::Instance();
+    bool debug = core.IsDebug();
 
     QueryResult r = CharacterDatabase.Query(
         "SELECT guid, zone_id, credit, player_level, player_class, "
@@ -199,11 +260,16 @@ void TerrorZonesMgr::MailContractRewards(uint64 beforeTickAt)
         uint32 gold = ContractGoldCopper(credit, _contractGoldPerCreditCopper,
                                          tierMult, _contractGoldCapCopper);
 
-        // Resolve the zone display name from the pool (write-once).
+        // Resolve the zone display name from the pool.
         std::string zoneName;
-        auto it = _poolIndex.find(zoneId);
-        if (it != _poolIndex.end() && it->second < _pool.size())
-            zoneName = _pool[it->second].displayName;
+        for (PoolEntry const& entry : core.GetPool())
+        {
+            if (entry.zoneId == zoneId)
+            {
+                zoneName = entry.displayName;
+                break;
+            }
+        }
         if (zoneName.empty())
             zoneName = std::to_string(zoneId);
 
@@ -222,7 +288,7 @@ void TerrorZonesMgr::MailContractRewards(uint64 beforeTickAt)
                     urand(0, ARMOR_SLOT_COUNT - 1));
                 uint32 entry = EncodeClassDropEntry(band, tier, arch,
                                                     armorSlot);
-                if (entry != 0 && _classDropEntries.count(entry)
+                if (entry != 0 && core.IsClassDropEntryValid(entry)
                     && sObjectMgr->GetItemTemplate(entry))
                 {
                     gearItem = Item::CreateItem(entry, 1, nullptr);
@@ -259,7 +325,7 @@ void TerrorZonesMgr::MailContractRewards(uint64 beforeTickAt)
         if (gaveGear)
             ++withGear;
 
-        if (_debug)
+        if (debug)
             LOG_INFO("module",
                      "mod-terror-zones: contract mail guid={} zone={} ({}) "
                      "credit={} tier={} gold={}c gear={}",
@@ -280,10 +346,10 @@ void TerrorZonesMgr::MailContractRewards(uint64 beforeTickAt)
              "(with_gear={})", beforeTickAt, mailed, withGear);
 }
 
-uint32 TerrorZonesMgr::GetContractCreditFor(uint32 guidLow,
-                                            uint32 zoneId) const
+uint32 TerrorZonesContractMgr::GetContractCreditFor(uint32 guidLow,
+                                                    uint32 zoneId) const
 {
-    uint64 tickAt = _rotation.tickAt;
+    uint64 tickAt = TerrorZonesMgr::Instance().GetActiveRotation().tickAt;
     if (tickAt == 0 || guidLow == 0 || zoneId == 0)
         return 0;
     QueryResult r = CharacterDatabase.Query(

@@ -1,4 +1,4 @@
-#include "TerrorZonesMgr.h"
+#include "TerrorZonesCombatMgr.h"
 
 #include "Creature.h"
 #include "ScriptMgr.h"
@@ -17,8 +17,8 @@ namespace
                                          Creature* creature,
                                          uint8& level) override
         {
-            TerrorZonesMgr::Instance().OnBeforeCreatureSelectLevel(creature,
-                                                                    level);
+            TerrorZonesCombatMgr::Instance().OnBeforeCreatureSelectLevel(creature,
+                                                                          level);
         }
 
         // Slice 8 — post-SelectLevel HP mult. Fires right after the
@@ -28,7 +28,7 @@ namespace
         void OnCreatureSelectLevel(CreatureTemplate const* /*cinfo*/,
                                     Creature* creature) override
         {
-            TerrorZonesMgr::Instance().OnAfterCreatureSelectLevel(creature);
+            TerrorZonesCombatMgr::Instance().OnAfterCreatureSelectLevel(creature);
         }
     };
 }
