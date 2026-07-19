@@ -51,8 +51,13 @@ namespace
         if (need == 0)
             handler->PSendSysMessage("  Level: {} (max)", level);
         else
-            handler->PSendSysMessage("  Level: {}   XP: {} / {}", level, xp, need);
+            handler->PSendSysMessage("  Level: {} / {}   XP: {} / {}",
+                                     level, mgr.GetMaxLevel(), xp, need);
         handler->PSendSysMessage("  XP source: {}", XPSourceName(entry->type));
+
+        uint32 magnitude = mgr.ComputeBuffMagnitude(entry, level);
+        handler->PSendSysMessage("  Buff: {} +{}",
+                                 BuffEffectLabel(entry->type), magnitude);
         return true;
     }
 

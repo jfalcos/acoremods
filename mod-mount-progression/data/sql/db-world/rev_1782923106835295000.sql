@@ -48,9 +48,35 @@
 --    magic" framing.
 -- ============================================================
 
-ALTER TABLE `mount_progression_catalog`
-    ADD COLUMN `excluded` TINYINT(1) NOT NULL DEFAULT 0,
-    ADD COLUMN `exclusion_reason` VARCHAR(255) NOT NULL DEFAULT '';
+-- Idempotency guard: this migration's ALTER ran against the live DB
+-- previously but the run was never recorded in the `updates` tracking
+-- table (state/record drift discovered 2026-07-05 while rebuilding the
+-- ac-db-import image for an unrelated change). `ADD COLUMN IF NOT
+-- EXISTS` is a MariaDB-only extension -- real MySQL (this deployment
+-- runs MySQL 8.4) rejects it as a syntax error -- so the standard
+-- information_schema + dynamic-SQL idiom is used instead to make both
+-- ADD COLUMN clauses safe to replay.
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'mount_progression_catalog'
+      AND column_name = 'excluded');
+SET @ddl = IF(@col_exists = 0,
+    'ALTER TABLE `mount_progression_catalog` ADD COLUMN `excluded` TINYINT(1) NOT NULL DEFAULT 0',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'mount_progression_catalog'
+      AND column_name = 'exclusion_reason');
+SET @ddl = IF(@col_exists = 0,
+    'ALTER TABLE `mount_progression_catalog` ADD COLUMN `exclusion_reason` VARCHAR(255) NOT NULL DEFAULT \'\'',
+    'SELECT 1');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 UPDATE `mount_progression_catalog`
 SET excluded = 1, exclusion_reason = 'Blizzard internal dev/test spell, not a real player mount'

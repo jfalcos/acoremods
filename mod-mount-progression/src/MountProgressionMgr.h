@@ -57,6 +57,10 @@ char const* RarityName(MountRarity r);
 char const* TypeName(MountType t);
 char const* XPSourceName(MountType t);
 
+// Human-readable label for a mount type's carrier buff, used in chat
+// output (e.g. "Attack Power", "Armor").
+char const* BuffEffectLabel(MountType t);
+
 class MountProgressionMgr
 {
 public:
