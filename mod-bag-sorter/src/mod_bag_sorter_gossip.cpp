@@ -65,13 +65,13 @@ public:
 
     bool OnCreatureGossipHelloAppend(Player* player, Creature* creature) override
     {
-        if (!BagSorter::settings.Enable || !creature->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER))
-            return false;
-
         // Additive hook: the core has already prepared the innkeeper's native
         // menu (rest/bind, vendor, etc.) and sends it once every module has
         // appended. We only add our option - no Prepare/Send here, so we
         // coexist with other modules (e.g. mod-terror-zones) on the same NPC.
+        if (!BagSorter::settings.Enable || !creature->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER))
+            return false;
+
         AddGossipItemFor(player, GOSSIP_ICON_TABARD, "Organize my bags", SENDER_BAGSORT, ACTION_OPEN);
         return true; // we appended an item
     }
@@ -130,6 +130,9 @@ public:
         BagSorter::settings.MergeStacks    = sConfigMgr->GetOption<bool>("BagSorter.MergeStacks", true);
         BagSorter::settings.Announce       = sConfigMgr->GetOption<bool>("BagSorter.Announce", true);
         BagSorter::settings.PinHearthstone = sConfigMgr->GetOption<bool>("BagSorter.PinHearthstone", true);
+
+        BagSorter::settings.BankEnable     = sConfigMgr->GetOption<bool>("BankSorter.Enable", true);
+        BagSorter::settings.BankSwapBags   = sConfigMgr->GetOption<bool>("BankSorter.SwapBags", true);
     }
 };
 

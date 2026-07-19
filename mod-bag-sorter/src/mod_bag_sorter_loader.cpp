@@ -18,10 +18,12 @@
 // Defined in the matching source files.
 void AddSC_mod_bag_sorter_gossip();
 void AddSC_mod_bag_sorter_command();
+void AddSC_mod_bag_sorter_bank_npc();
 
 // Entry point invoked by the generated module script loader.
 void Addmod_bag_sorterScripts()
 {
     AddSC_mod_bag_sorter_gossip();
     AddSC_mod_bag_sorter_command();
+    AddSC_mod_bag_sorter_bank_npc();
 }

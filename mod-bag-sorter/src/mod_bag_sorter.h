@@ -21,6 +21,7 @@
 #include "Define.h"
 
 class Player;
+class Item;
 
 namespace BagSorter
 {
@@ -39,10 +40,19 @@ namespace BagSorter
         bool MergeStacks    = true;
         bool Announce       = true;
         bool PinHearthstone = true;  // always place the Hearthstone in the backpack's first slot
+
+        bool BankEnable     = true;  // "Bag & Bank Organizer" NPC gossip: "Deposit everything" + "Organize my bank"
+        bool BankSwapBags   = true;  // let bank sorting move higher-capacity spare (unequipped) bags into the bank
     };
 
     // Runtime config, populated from worldserver config in OnAfterConfigLoad.
     extern Settings settings;
+
+    // Shared item ordering for the chosen SortMode (class/subclass/type, then
+    // quality, item level, or name - see SortMode). Used by both carried-bag
+    // and bank sorting so "type & quality" groups materials (e.g. all leathers)
+    // together and by quality the same way in both places.
+    bool CompareItems(Item* a, Item* b, SortMode mode);
 
     // Sorts the player's carried bags (backpack + the 4 equipped bag containers)
     // using the chosen mode. Returns the number of items that were arranged.
@@ -54,6 +64,27 @@ namespace BagSorter
     // first slot for every mode. In TypeQualityQuestLast, quest-class items are
     // additionally packed into the tail of the general pool (the last bag).
     uint32 Sort(Player* player, SortMode mode);
+
+    // Moves bankable items from the player's carried bags (backpack + every
+    // equipped bag, general or specialized) into bank storage. Skips items
+    // that don't fit or can't legally be banked - nothing is ever forced in or
+    // destroyed. Bag containers and (if PinHearthstone) the Hearthstone are
+    // never deposited. Returns the number of items deposited.
+    uint32 DepositToBank(Player* player);
+
+    // Sorts the player's bank storage (the 28 main bank slots + every
+    // purchased bank bag) using the chosen mode. If BankSwapBags is set, first
+    // moves any unequipped ("spare") bag - one sitting loose in the backpack
+    // or inside an equipped bag, never one of the 4 equipped bag containers
+    // themselves - with more capacity than a purchased bank bag into the bank
+    // (displacing the smaller/empty bank bag into the spare bag's old spot).
+    // Partial stacks of the same item are merged bank-wide. Specialized
+    // bank bags (herb bag, enchanting bag, ...) then greedily claim matching
+    // items from the rest of the bank before the remainder is grouped/sorted
+    // normally. Every item always keeps a slot within the bank's existing
+    // storage, so nothing is ever lost. Returns the number of items arranged
+    // (plus any bag swaps performed).
+    uint32 SortBank(Player* player, SortMode mode);
 }
 
 #endif // MOD_BAG_SORTER_H

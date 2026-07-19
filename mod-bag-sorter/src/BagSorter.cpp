@@ -28,6 +28,43 @@
 namespace BagSorter
 {
     Settings settings;
+
+    bool CompareItems(Item* a, Item* b, SortMode mode)
+    {
+        // Quest-last shares the TypeQuality ordering; the quest sweep is applied
+        // afterwards during placement, not in the comparator.
+        if (mode == SortMode::TypeQualityQuestLast)
+            mode = SortMode::TypeQuality;
+
+        ItemTemplate const* ta = a->GetTemplate();
+        ItemTemplate const* tb = b->GetTemplate();
+
+        switch (mode)
+        {
+            case SortMode::TypeQuality:
+                if (ta->Class != tb->Class)                 return ta->Class < tb->Class;
+                if (ta->SubClass != tb->SubClass)           return ta->SubClass < tb->SubClass;
+                if (ta->InventoryType != tb->InventoryType) return ta->InventoryType < tb->InventoryType;
+                if (ta->Quality != tb->Quality)             return ta->Quality > tb->Quality;
+                if (ta->ItemLevel != tb->ItemLevel)         return ta->ItemLevel > tb->ItemLevel;
+                break;
+            case SortMode::Quality:
+                if (ta->Quality != tb->Quality)             return ta->Quality > tb->Quality;
+                break;
+            case SortMode::ItemLevel:
+                if (ta->ItemLevel != tb->ItemLevel)         return ta->ItemLevel > tb->ItemLevel;
+                if (ta->Quality != tb->Quality)             return ta->Quality > tb->Quality;
+                break;
+            case SortMode::Name:
+            case SortMode::TypeQualityQuestLast:            // already remapped above
+                break;
+        }
+
+        if (ta->Name1 != tb->Name1)
+            return ta->Name1 < tb->Name1;
+
+        return a->GetGUID() < b->GetGUID(); // stable, deterministic tiebreak
+    }
 }
 
 using namespace BagSorter;
@@ -120,43 +157,6 @@ namespace
                 }
             }
         }
-    }
-
-    bool CompareItems(Item* a, Item* b, SortMode mode)
-    {
-        // Quest-last shares the TypeQuality ordering; the quest sweep is applied
-        // afterwards during placement, not in the comparator.
-        if (mode == SortMode::TypeQualityQuestLast)
-            mode = SortMode::TypeQuality;
-
-        ItemTemplate const* ta = a->GetTemplate();
-        ItemTemplate const* tb = b->GetTemplate();
-
-        switch (mode)
-        {
-            case SortMode::TypeQuality:
-                if (ta->Class != tb->Class)                 return ta->Class < tb->Class;
-                if (ta->SubClass != tb->SubClass)           return ta->SubClass < tb->SubClass;
-                if (ta->InventoryType != tb->InventoryType) return ta->InventoryType < tb->InventoryType;
-                if (ta->Quality != tb->Quality)             return ta->Quality > tb->Quality;
-                if (ta->ItemLevel != tb->ItemLevel)         return ta->ItemLevel > tb->ItemLevel;
-                break;
-            case SortMode::Quality:
-                if (ta->Quality != tb->Quality)             return ta->Quality > tb->Quality;
-                break;
-            case SortMode::ItemLevel:
-                if (ta->ItemLevel != tb->ItemLevel)         return ta->ItemLevel > tb->ItemLevel;
-                if (ta->Quality != tb->Quality)             return ta->Quality > tb->Quality;
-                break;
-            case SortMode::Name:
-            case SortMode::TypeQualityQuestLast:            // already remapped above
-                break;
-        }
-
-        if (ta->Name1 != tb->Name1)
-            return ta->Name1 < tb->Name1;
-
-        return a->GetGUID() < b->GetGUID(); // stable, deterministic tiebreak
     }
 
     std::vector<Item*> CollectItems(Player* player, std::vector<uint16> const& slots)

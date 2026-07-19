@@ -33,7 +33,35 @@ BagSorter.Announce = 1
 #    BagSorter.PinHearthstone
 #        Description: Always place the Hearthstone (item 6948) in the backpack's
 #                     first slot when sorting, regardless of the chosen mode.
+#                     Also kept out of the bank by "Deposit everything".
 #        Default:     1 (enabled)
 #
 
 BagSorter.PinHearthstone = 1
+
+#
+#    BankSorter.Enable
+#        Description: Master switch for the dedicated "Bag & Bank Organizer"
+#                     NPC's gossip options: "Deposit everything into my bank"
+#                     and "Organize my bank". This NPC is separate from the
+#                     real banker (see data/sql/db-world) so nothing about the
+#                     banker itself is touched.
+#        Default:     1 (enabled)
+#
+
+BankSorter.Enable = 1
+
+#
+#    BankSorter.SwapBags
+#        Description: Let "Organize my bank" move an unequipped ("spare") bag
+#                     - one sitting loose in the backpack or inside an
+#                     equipped bag, never one of your 4 equipped bags - into a
+#                     purchased bank bag slot whenever it holds more space than
+#                     what's currently there (the displaced bank bag, or
+#                     nothing if the slot was empty, comes back to the spare
+#                     bag's old spot). Equipped bags are never touched.
+#                     0 leaves bag placement untouched.
+#        Default:     1 (enabled)
+#
+
+BankSorter.SwapBags = 1
