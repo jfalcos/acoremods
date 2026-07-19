@@ -135,7 +135,8 @@ void LoadCustomItems()
         "dmg_min2, dmg_max2, dmg_type2, "
         "delay, armor, "
         "strip_sockets, strip_equip_gating, strip_weapon_procs, "
-        "strip_random_affixes, strip_vendor_fields, force_bonding "
+        "strip_random_affixes, strip_vendor_fields, force_bonding, "
+        "spellid_1, spelltrigger_1, ScriptName "
         "FROM custom_item_template");
     if (!ir)
     {
@@ -180,6 +181,9 @@ void LoadCustomItems()
         bool stripVendorFields  = f[42].Get<uint8>() != 0;
         bool forceBondingSet    = !f[43].IsNull();
         uint8 forceBonding      = forceBondingSet ? f[43].Get<uint8>() : 0;
+        int32 spellId1          = f[44].Get<int32>();
+        uint8 spellTrigger1     = f[45].Get<uint8>();
+        std::string scriptName  = f[46].Get<std::string>();
 
         if (!IsCustomItemEntry(entry))
         {
@@ -341,6 +345,23 @@ void LoadCustomItems()
                 clone.Spells[i].SpellCategoryCooldown = -1;
             }
         }
+
+        // Policy: on-use spell override (slot 1 only — the only slot a
+        // consumer has needed so far). 0 = inherit donor's Spells[0].
+        // Lets a scripted utility item (e.g. a teleport beacon) carry
+        // its own "ticket" spell instead of the donor's real one.
+        if (spellId1 != 0)
+        {
+            clone.Spells[0].SpellId      = spellId1;
+            clone.Spells[0].SpellTrigger = spellTrigger1;
+        }
+
+        // Policy: ScriptName override. Empty = inherit donor's ScriptId
+        // (almost always 0 for the gear donors this module was built
+        // for). Needed for scripted utility items whose behavior lives
+        // in an ItemScript rather than stats/procs.
+        if (!scriptName.empty())
+            clone.ScriptId = sObjectMgr->GetScriptId(scriptName);
 
         (*store)[entry] = std::move(clone);
         ++injected;
