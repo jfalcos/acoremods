@@ -209,9 +209,11 @@ namespace
         float budget = upgrades::UpgradeBudget(pm.UpgradeCfg(),
                                                proto->Quality, proto->ItemLevel);
         handler->PSendSysMessage("{} - |cffffd100upgrade budget {:.0f}/{:.0f}|r:",
-                                 proto->Name1, upgrades::BudgetSpent(rows), budget);
+                                 proto->Name1,
+                                 mod_property_override::BudgetSpent(rows, "paragon"), budget);
         for (auto const& row : rows)
-            handler->PSendSysMessage("  {} |cff1eff00+{}|r",
+            handler->PSendSysMessage("  [{}] {} |cff1eff00+{}|r",
+                                     row.source,
                                      PropertyName(static_cast<Property>(row.property)),
                                      row.value);
         if (rows.empty())

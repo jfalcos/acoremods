@@ -51,10 +51,18 @@ GM: `.paragon addpx / setlevel / coins / resetperks / debug / reload / vendor`.
   equipped item instance — any of the 40 supported properties, capped by an
   item-level budget (`BudgetPercent`% of the item's native stat budget; the
   quality slopes are fitted against the real item corpus — see the conf).
-  The mod-property-override row IS the entire upgrade state: no extra table,
-  upgrades ride the instance through trades/mail (activating at the new
-  owner's next login) and show in tooltips via PropertyOverlay. Cost per
-  chunk rises 1→4 coins as the item's budget fills.
+  The mod-property-override row IS the entire upgrade state (source
+  'paragon'): no extra table, upgrades ride the instance through trades/mail
+  (activating at the new owner's next login) and show in tooltips via
+  PropertyOverlay. Cost per chunk rises 1→4 coins as the item's budget fills.
+  The itemization facts (per-property weights, native budget curve, budget
+  accounting) and the parchment-gossip display toolkit were extracted to
+  mod-property-override (`PropertyOverrideItemization.h` /
+  `PropertyOverrideDisplay.h`) when `mod-item-infusion` became a second
+  consumer — this module keeps only its shop policy (chunks, categories,
+  labels, coin cost curve, the 30% cap). Paragon Coins also serve as
+  mod-item-infusion's optional risk-mitigation currency (read via
+  `ParagonMgr::CoinItemId()`).
 - **Quartermaster** (creature 96000) is seeded but not spawned — place one
   with `.npc add 96000` wherever fits your world. Gossip: perks, item
   upgrades (slot → category → stat), and the cosmetics stock, which rotates

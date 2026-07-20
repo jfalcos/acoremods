@@ -6,6 +6,8 @@
 #include "ScriptMgr.h"
 #include "SharedDefines.h"
 
+#include <algorithm>
+
 using namespace mod_property_override;
 
 namespace
@@ -108,11 +110,25 @@ namespace
             addon::Query query = addon::ParseQuery(msg);
             if (query.kind != addon::Query::Kind::Invalid)
             {
+                // Same property can exist under several sources ('paragon',
+                // 'mix', ...); the tooltip wants one merged line per property.
                 std::vector<addon::RowView> rows;
                 if (Item* item = ResolveQueryItem(player, query))
                     for (OverrideRow const& row :
                          mgr.GetActiveOverrides(player, item->GetGUID().GetCounter()))
-                        rows.push_back({ row.property, row.value, row.expiry });
+                    {
+                        auto it = std::find_if(rows.begin(), rows.end(),
+                                               [&](addon::RowView const& v)
+                                               { return v.property == row.property; });
+                        if (it == rows.end())
+                            rows.push_back({ row.property, row.value, row.expiry });
+                        else
+                        {
+                            it->value += row.value;
+                            if (row.expiry != 0 && (it->expiry == 0 || row.expiry < it->expiry))
+                                it->expiry = row.expiry;
+                        }
+                    }
 
                 mgr.SendAddonMessage(player, addon::BuildReply(query, rows));
             }

@@ -72,7 +72,7 @@ namespace
         if (!item)
             return true;
 
-        if (!mgr.AddOverride(handler->GetPlayer(), item, *prop, value, duration))
+        if (!mgr.AddOverride(handler->GetPlayer(), item, "gm", *prop, value, duration))
         {
             handler->SendSysMessage("Failed to add override.");
             return true;
@@ -98,20 +98,25 @@ namespace
         uint32 slot = 0;
         if (!(in >> slot))
         {
-            handler->SendSysMessage("Usage: .propover clear <slot>");
+            handler->SendSysMessage("Usage: .propover clear <slot> [source]");
+            handler->SendSysMessage("Omitting source clears every system's rows on the item.");
             return true;
         }
+        std::string source;
+        in >> source; // optional; empty = all sources
 
         Item* item = GetEquippedItem(handler, slot);
         if (!item)
             return true;
 
-        bool hadAny = PropertyOverrideMgr::Instance().ClearOverrides(handler->GetPlayer(), item);
+        bool hadAny = PropertyOverrideMgr::Instance().ClearOverrides(
+            handler->GetPlayer(), item, source);
         if (hadAny)
-            handler->PSendSysMessage("Overrides cleared for item guid {}.",
-                                     item->GetGUID().GetCounter());
+            handler->PSendSysMessage("Overrides cleared for item guid {}{}.",
+                                     item->GetGUID().GetCounter(),
+                                     source.empty() ? "" : " (source " + source + ")");
         else
-            handler->PSendSysMessage("No overrides on item guid {}.",
+            handler->PSendSysMessage("No matching overrides on item guid {}.",
                                      item->GetGUID().GetCounter());
         PushInvalidate(handler->GetPlayer());
         return true;
@@ -145,11 +150,13 @@ namespace
         for (OverrideRow const& row : rows)
         {
             if (row.expiry)
-                handler->PSendSysMessage("  {} {:+d} (expires at {})",
+                handler->PSendSysMessage("  [{}] {} {:+d} (expires at {})",
+                                         row.source,
                                          PropertyName(static_cast<Property>(row.property)),
                                          row.value, row.expiry);
             else
-                handler->PSendSysMessage("  {} {:+d} (permanent)",
+                handler->PSendSysMessage("  [{}] {} {:+d} (permanent)",
+                                         row.source,
                                          PropertyName(static_cast<Property>(row.property)),
                                          row.value);
         }

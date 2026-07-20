@@ -6,8 +6,9 @@
 
 using namespace mod_paragon::upgrades;
 using mod_property_override::AllProperties;
-using mod_property_override::OverrideRow;
+using mod_property_override::NativeBudget;
 using mod_property_override::Property;
+using mod_property_override::PropertyWeight;
 
 TEST(ItemUpgrades, TableCoversEverySupportedProperty)
 {
@@ -16,7 +17,6 @@ TEST(ItemUpgrades, TableCoversEverySupportedProperty)
         PropertyDef const* def = FindDef(p);
         ASSERT_NE(def, nullptr) << static_cast<int>(p);
         EXPECT_TRUE(def->chunk > 0);
-        EXPECT_TRUE(def->weight > 0.f);
         EXPECT_TRUE(def->label && def->label[0] != '\0');
         EXPECT_NE(CategoryOf(p), Category::Max);
     }
@@ -46,19 +46,10 @@ TEST(ItemUpgrades, ChunksAreBudgetNormalized)
     // (that's the knob that keeps all stats equally paced).
     for (auto const& def : AllUpgradeDefs())
     {
-        float points = def.weight * static_cast<float>(def.chunk);
+        float points = PropertyWeight(def.prop) * static_cast<float>(def.chunk);
         EXPECT_TRUE(points >= 4.f && points <= 15.f + 1.f)
             << "prop " << static_cast<int>(def.prop) << " points " << points;
     }
-}
-
-TEST(ItemUpgrades, NativeBudgetMonotonic)
-{
-    EXPECT_TRUE(NativeBudget(2, 100) < NativeBudget(3, 100));
-    EXPECT_TRUE(NativeBudget(3, 100) < NativeBudget(4, 100));
-    EXPECT_TRUE(NativeBudget(4, 100) < NativeBudget(4, 200));
-    // Fitted anchors (see derivation in the header).
-    EXPECT_TRUE(NativeBudget(4, 200) > 230.f && NativeBudget(4, 200) < 250.f);
 }
 
 TEST(ItemUpgrades, UpgradeBudgetAppliesPercent)
@@ -68,19 +59,6 @@ TEST(ItemUpgrades, UpgradeBudgetAppliesPercent)
     float native = NativeBudget(4, 200);
     EXPECT_TRUE(UpgradeBudget(cfg, 4, 200) > native * 0.29f);
     EXPECT_TRUE(UpgradeBudget(cfg, 4, 200) < native * 0.31f);
-}
-
-TEST(ItemUpgrades, BudgetSpentWeighsRows)
-{
-    std::vector<OverrideRow> rows =
-    {
-        { static_cast<uint8>(Property::Stamina),     20, 0 }, // w1.0 -> 20
-        { static_cast<uint8>(Property::AttackPower), 40, 0 }, // w0.5 -> 20
-        { static_cast<uint8>(Property::Armor),      100, 0 }, // w0.1 -> 10
-    };
-    float spent = BudgetSpent(rows);
-    EXPECT_TRUE(spent > 49.9f && spent < 50.1f);
-    EXPECT_EQ(BudgetSpent({}), 0.f);
 }
 
 TEST(ItemUpgrades, CostTiersRiseWithFill)

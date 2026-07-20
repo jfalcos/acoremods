@@ -8,7 +8,8 @@ get_property(_ACORE_MODULE_TEST_SOURCES GLOBAL PROPERTY ACORE_MODULE_TEST_SOURCE
 list(APPEND _ACORE_MODULE_TEST_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/tests/PropertyOverridePropertiesTests.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/tests/PropertyOverrideAddonMsgTests.cpp"
-    "${CMAKE_CURRENT_LIST_DIR}/tests/PropertyOverrideLifecycleTests.cpp")
+    "${CMAKE_CURRENT_LIST_DIR}/tests/PropertyOverrideLifecycleTests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/tests/PropertyOverrideItemizationTests.cpp")
 set_property(GLOBAL PROPERTY ACORE_MODULE_TEST_SOURCES
     "${_ACORE_MODULE_TEST_SOURCES}")
 

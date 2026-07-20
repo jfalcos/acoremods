@@ -40,6 +40,18 @@ being wasted.
 
 ## 3. Item mixing module
 
+> **Status (2026-07-20): shipped as `mod-item-infusion`** — sacrifice a donor
+> item to transfer 35% of its native stats onto a target as source-'mix'
+> override rows. Risk model chosen after a prior-art pass (L2/BDO destruction,
+> PoE Vaal corruption, FFXIV overmeld, WoW 8.3 Corruption, Cata Reforging):
+> destruction risk on the TARGET, growing with accumulated infusion
+> (5% fresh -> 50% at paragon-cap-equivalent fill -> 90% ceiling), mitigated
+> per-attempt by Paragon Coins and alchemy substances, floored at 2%. Risk
+> replaces the hard cap. The split also moved the shared itemization math and
+> the parchment-gossip toolkit into mod-property-override
+> (PropertyOverrideItemization/Display), and item override rows gained a
+> `source` namespace mirroring player rows.
+
 Combine multiple items into one with blended stats.
 
 - `mod-custom-items` (this repo) is the right structural base — same

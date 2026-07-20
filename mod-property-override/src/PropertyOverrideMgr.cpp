@@ -66,7 +66,7 @@ void PropertyOverrideMgr::LoadPlayer(Player* player)
 
     ItemOverrideMap loaded;
     if (QueryResult result = CharacterDatabase.Query(
-            "SELECT o.item_guid, o.property, o.value, o.expiry "
+            "SELECT o.item_guid, o.source, o.property, o.value, o.expiry "
             "FROM item_property_override o "
             "JOIN item_instance i ON i.guid = o.item_guid "
             "WHERE i.owner_guid = {}",
@@ -77,20 +77,22 @@ void PropertyOverrideMgr::LoadPlayer(Player* player)
             Field* f = result->Fetch();
             OverrideRow row;
             ObjectGuid::LowType itemGuid = f[0].Get<uint32>();
-            row.property = f[1].Get<uint8>();
-            row.value    = f[2].Get<int32>();
-            row.expiry   = f[3].Get<uint64>();
+            row.source   = f[1].Get<std::string>();
+            row.property = f[2].Get<uint8>();
+            row.value    = f[3].Get<int32>();
+            row.expiry   = f[4].Get<uint64>();
 
-            if (!IsValidProperty(row.property))
+            if (!IsValidProperty(row.property) || !IsValidSource(row.source))
                 continue;
             if (row.IsExpired(now))
             {
                 CharacterDatabase.Execute(
-                    "DELETE FROM item_property_override WHERE item_guid = {} AND property = {}",
-                    itemGuid, row.property);
+                    "DELETE FROM item_property_override "
+                    "WHERE item_guid = {} AND source = '{}' AND property = {}",
+                    itemGuid, row.source, row.property);
                 continue;
             }
-            loaded[itemGuid].push_back(row);
+            loaded[itemGuid].push_back(std::move(row));
         } while (result->NextRow());
     }
 
@@ -264,10 +266,11 @@ void PropertyOverrideMgr::HandleItemDestroyed(Player* player, Item* item)
     // when the engine deletes the item_instance row.
 }
 
-bool PropertyOverrideMgr::AddOverride(Player* owner, Item* item, Property prop,
-                                      int32 value, uint32 durationSecs)
+bool PropertyOverrideMgr::AddOverride(Player* owner, Item* item, std::string_view source,
+                                      Property prop, int32 value, uint32 durationSecs)
 {
-    if (!_enabled || !owner || !item || !IsValidProperty(static_cast<uint8>(prop)))
+    if (!_enabled || !owner || !item || !IsValidSource(source) ||
+        !IsValidProperty(static_cast<uint8>(prop)))
         return false;
 
     uint64 now = NowSecs();
@@ -275,6 +278,7 @@ bool PropertyOverrideMgr::AddOverride(Player* owner, Item* item, Property prop,
     ObjectGuid::LowType itemGuid = item->GetGUID().GetCounter();
     ObjectGuid::LowType ownerGuid = owner->GetGUID().GetCounter();
     uint8 rawProp = static_cast<uint8>(prop);
+    std::string src(source);
 
     PlayerState& state = _players[ownerGuid];
 
@@ -284,33 +288,36 @@ bool PropertyOverrideMgr::AddOverride(Player* owner, Item* item, Property prop,
 
     auto& rows = state.overrides[itemGuid];
     auto rowIt = std::find_if(rows.begin(), rows.end(),
-                              [rawProp](OverrideRow const& r) { return r.property == rawProp; });
+                              [&](OverrideRow const& r)
+                              { return r.source == src && r.property == rawProp; });
     if (rowIt != rows.end())
     {
         rowIt->value = value;
         rowIt->expiry = expiry;
     }
     else
-        rows.push_back({ rawProp, value, expiry });
+        rows.push_back({ src, rawProp, value, expiry });
 
     CharacterDatabase.Execute(
-        "INSERT INTO item_property_override (item_guid, owner_guid, property, value, expiry) "
-        "VALUES ({}, {}, {}, {}, {}) "
+        "INSERT INTO item_property_override (item_guid, owner_guid, source, property, value, expiry) "
+        "VALUES ({}, {}, '{}', {}, {}, {}) "
         "ON DUPLICATE KEY UPDATE value = VALUES(value), expiry = VALUES(expiry), "
         "owner_guid = VALUES(owner_guid)",
-        itemGuid, ownerGuid, rawProp, value, expiry);
+        itemGuid, ownerGuid, src, rawProp, value, expiry);
 
     Sync(owner);
 
     if (_debug)
-        LOG_INFO("module", "mod-property-override: set item {} {}={} (expiry {}) "
-                 "for player guid {}.", itemGuid, PropertyName(prop), value, expiry, ownerGuid);
+        LOG_INFO("module", "mod-property-override: set item {} [{}] {}={} (expiry {}) "
+                 "for player guid {}.", itemGuid, src, PropertyName(prop), value, expiry, ownerGuid);
     return true;
 }
 
-bool PropertyOverrideMgr::ClearOverrides(Player* owner, Item* item)
+bool PropertyOverrideMgr::ClearOverrides(Player* owner, Item* item, std::string_view source)
 {
     if (!_enabled || !owner || !item)
+        return false;
+    if (!source.empty() && !IsValidSource(source))
         return false;
 
     ObjectGuid::LowType itemGuid = item->GetGUID().GetCounter();
@@ -322,13 +329,39 @@ bool PropertyOverrideMgr::ClearOverrides(Player* owner, Item* item)
     {
         PlayerState& state = stateIt->second;
         UnapplyItem(owner, state, itemGuid);
-        hadAny = state.overrides.erase(itemGuid) > 0;
-        if (state.overrides.empty() && state.applied.empty())
+        auto itemIt = state.overrides.find(itemGuid);
+        if (itemIt != state.overrides.end())
+        {
+            if (source.empty())
+            {
+                hadAny = true;
+                state.overrides.erase(itemIt);
+            }
+            else
+            {
+                auto& rows = itemIt->second;
+                size_t before = rows.size();
+                rows.erase(std::remove_if(rows.begin(), rows.end(),
+                                          [&](OverrideRow const& r) { return r.source == source; }),
+                           rows.end());
+                hadAny = rows.size() != before;
+                if (rows.empty())
+                    state.overrides.erase(itemIt);
+            }
+        }
+        Sync(owner); // remaining sources (if any) go back on
+        if (state.overrides.empty() && state.applied.empty() &&
+            state.playerRows.empty() && state.playerApplied.empty())
             _players.erase(stateIt);
     }
 
-    CharacterDatabase.Execute(
-        "DELETE FROM item_property_override WHERE item_guid = {}", itemGuid);
+    if (source.empty())
+        CharacterDatabase.Execute(
+            "DELETE FROM item_property_override WHERE item_guid = {}", itemGuid);
+    else
+        CharacterDatabase.Execute(
+            "DELETE FROM item_property_override WHERE item_guid = {} AND source = '{}'",
+            itemGuid, std::string(source));
     return hadAny;
 }
 
@@ -505,8 +538,9 @@ void PropertyOverrideMgr::PruneExpiredRows(PlayerState& state,
         if (rowIt->IsExpired(now))
         {
             CharacterDatabase.Execute(
-                "DELETE FROM item_property_override WHERE item_guid = {} AND property = {}",
-                itemGuid, rowIt->property);
+                "DELETE FROM item_property_override "
+                "WHERE item_guid = {} AND source = '{}' AND property = {}",
+                itemGuid, rowIt->source, rowIt->property);
             rowIt = rows.erase(rowIt);
         }
         else

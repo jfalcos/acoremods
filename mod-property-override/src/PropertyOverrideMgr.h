@@ -14,8 +14,13 @@ class Player;
 namespace mod_property_override
 {
 
+// Item-target override row. `source` namespaces the owning system
+// ('gm', 'paragon', 'mix', ...) exactly like PlayerRow: systems budget and
+// clear their own rows, and the same property from different sources stacks
+// additively.
 struct OverrideRow
 {
+    std::string source;
     uint8 property;
     int32 value;
     uint64 expiry; // unix seconds, 0 = permanent
@@ -107,8 +112,11 @@ public:
     void HandleItemDestroyed(Player* player, Item* item);
 
     // GM/purchase API. The item may be anywhere (equipped or not).
-    bool AddOverride(Player* owner, Item* item, Property prop, int32 value, uint32 durationSecs);
-    bool ClearOverrides(Player* owner, Item* item);
+    // `source` must satisfy IsValidSource.
+    bool AddOverride(Player* owner, Item* item, std::string_view source,
+                     Property prop, int32 value, uint32 durationSecs);
+    // Empty source clears every system's rows on the item.
+    bool ClearOverrides(Player* owner, Item* item, std::string_view source = {});
 
     // Non-expired rows for an item of this (online) owner. Empty if none.
     std::vector<OverrideRow> GetActiveOverrides(Player* owner, ObjectGuid::LowType itemGuid) const;

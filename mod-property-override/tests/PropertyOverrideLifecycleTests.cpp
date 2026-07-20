@@ -25,7 +25,7 @@ namespace
 TEST(Lifecycle, FreshEquipApplies)
 {
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 0 } };
+    overrides[100] = { { "gm", 2, 50, 0 } };
     AppliedMap applied;
 
     SyncActions a = ComputeSyncActions(overrides, applied, { 100 }, 1000);
@@ -38,7 +38,7 @@ TEST(Lifecycle, FreshEquipApplies)
 TEST(Lifecycle, UnequipUnapplies)
 {
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 0 } };
+    overrides[100] = { { "gm", 2, 50, 0 } };
     AppliedMap applied;
     applied[100] = MakeApplied({ { 2, 50.f } });
 
@@ -52,8 +52,8 @@ TEST(Lifecycle, UnequipUnapplies)
 TEST(Lifecycle, SteadyStateIsANoOp)
 {
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 0 } };
-    overrides[200] = { { 0, 10, 0 } };
+    overrides[100] = { { "gm", 2, 50, 0 } };
+    overrides[200] = { { "gm", 0, 10, 0 } };
     AppliedMap applied;
     applied[100] = MakeApplied({ { 2, 50.f } });
     applied[200] = MakeApplied({ { 0, 10.f } });
@@ -67,8 +67,8 @@ TEST(Lifecycle, SteadyStateIsANoOp)
 TEST(Lifecycle, SwapUnappliesOldAndAppliesNew)
 {
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 0 } };
-    overrides[200] = { { 0, 10, 0 } };
+    overrides[100] = { { "gm", 2, 50, 0 } };
+    overrides[200] = { { "gm", 0, 10, 0 } };
     AppliedMap applied;
     applied[100] = MakeApplied({ { 2, 50.f } });
 
@@ -84,7 +84,7 @@ TEST(Lifecycle, ExpiredWhileEquippedReappliesRemainingRows)
     // Item has one expired row and one live row: old snapshot must come off
     // (unapply), expired rows pruned, remaining row reapplied (apply).
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 500 }, { 0, 10, 0 } };
+    overrides[100] = { { "gm", 2, 50, 500 }, { "gm", 0, 10, 0 } };
     AppliedMap applied;
     applied[100] = MakeApplied({ { 2, 50.f }, { 0, 10.f } }, /*minExpiry=*/500);
 
@@ -97,7 +97,7 @@ TEST(Lifecycle, ExpiredWhileEquippedReappliesRemainingRows)
 TEST(Lifecycle, FullyExpiredItemOnlyUnapplies)
 {
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 500 } };
+    overrides[100] = { { "gm", 2, 50, 500 } };
     AppliedMap applied;
     applied[100] = MakeApplied({ { 2, 50.f } }, /*minExpiry=*/500);
 
@@ -110,7 +110,7 @@ TEST(Lifecycle, FullyExpiredItemOnlyUnapplies)
 TEST(Lifecycle, NotYetExpiredIsANoOp)
 {
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 2000 } };
+    overrides[100] = { { "gm", 2, 50, 2000 } };
     AppliedMap applied;
     applied[100] = MakeApplied({ { 2, 50.f } }, /*minExpiry=*/2000);
 
@@ -123,7 +123,7 @@ TEST(Lifecycle, NotYetExpiredIsANoOp)
 TEST(Lifecycle, EquippedItemWithOnlyExpiredRowsNeverApplies)
 {
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 500 } };
+    overrides[100] = { { "gm", 2, 50, 500 } };
     AppliedMap applied; // never applied (e.g. expired while in bags)
 
     SyncActions a = ComputeSyncActions(overrides, applied, { 100 }, 1000);
@@ -182,7 +182,7 @@ TEST(PlayerRows, FilterOnEmptyIsEmpty)
 TEST(Lifecycle, IdempotentAfterActionsAreExecuted)
 {
     ItemOverrideMap overrides;
-    overrides[100] = { { 2, 50, 0 } };
+    overrides[100] = { { "gm", 2, 50, 0 } };
     AppliedMap applied;
 
     SyncActions first = ComputeSyncActions(overrides, applied, { 100 }, 1000);

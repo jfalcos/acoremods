@@ -1,20 +1,22 @@
 #ifndef MOD_PARAGON_ITEM_UPGRADES_H
 #define MOD_PARAGON_ITEM_UPGRADES_H
 
+#include "PropertyOverrideItemization.h"
 #include "PropertyOverrideMgr.h"
 #include <array>
 #include <string_view>
 #include <vector>
 
-// Item-upgrade math — pure, no engine dependencies, unit-testable.
+// Item-upgrade SHOP math — pure, no engine dependencies, unit-testable.
 //
 // Design: the mod-property-override row on an item instance IS the upgrade
-// state. Purchases come in fixed per-property chunks; an item's total upgrade
-// room is a budget derived from its (Quality, ItemLevel) using slopes fitted
-// against the real item corpus (18k+ equippables in acore_world, 2026-07-19):
-//   quality 2: 0.4111 weighted pts/ilvl, 3: 0.5794, 4: 1.1999.
-// Weights approximate Blizzard itemization costs (primaries/ratings/SP 1.0,
-// AP 0.5, HP5/MP5 2.5, health/mana 0.05).
+// state (source='paragon'). Purchases come in fixed per-property chunks; an
+// item's total upgrade room is `budgetPercent` of its native (Quality,
+// ItemLevel) budget. The itemization facts (per-property weights, the
+// corpus-fitted native budget curve, per-source budget accounting) live in
+// the platform: mod-property-override/src/PropertyOverrideItemization.h.
+// This unit owns only what the paragon shop decides: chunk sizes, menu
+// categories/labels, the coin cost curve, and the budget-percent cap.
 
 namespace mod_paragon::upgrades
 {
@@ -31,9 +33,9 @@ struct UpgradeConfig
 struct PropertyDef
 {
     Property prop;
-    uint32 chunk;       // stat granted per purchase
-    float weight;       // budget points per stat point (itemization cost)
-    char const* label;  // player-facing name ("Crit Rating (all schools)")
+    uint32 chunk;       // stat granted per purchase (sized so one purchase
+                        // ≈ 5 weighted budget points across the board)
+    char const* label;  // player-facing name ("Crit Rating (ALL, 3x budget)")
 };
 
 // Menu categories (gossip menus can't hold 40 rows).
@@ -55,13 +57,8 @@ PropertyDef const* FindDef(Property p);
 Category CategoryOf(Property p);
 std::vector<PropertyDef> const& DefsInCategory(Category c);
 
-// Native full-item stat budget for (quality, itemLevel); upgrade cap is
-// budgetPercent of this.
-float NativeBudget(uint32 quality, uint32 itemLevel);
+// Upgrade cap: budgetPercent of the platform's NativeBudget.
 float UpgradeBudget(UpgradeConfig const& cfg, uint32 quality, uint32 itemLevel);
-
-// Weighted budget points already consumed by the item's override rows.
-float BudgetSpent(std::vector<OverrideRow> const& rows);
 
 // Coin cost of the next chunk given how full the budget is (0.0-1.0):
 // 1 coin below 1/3, up to 4 approaching the cap.

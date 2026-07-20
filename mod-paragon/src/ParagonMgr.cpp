@@ -390,8 +390,9 @@ bool ParagonMgr::TryPurchaseItemUpgrade(Player* player, Item* item, upgrades::Pr
     auto rows = props.GetActiveOverrides(player, itemGuid);
 
     float budget = upgrades::UpgradeBudget(_upgradeCfg, proto->Quality, proto->ItemLevel);
-    float spent = upgrades::BudgetSpent(rows);
-    float chunkCost = def->weight * static_cast<float>(def->chunk);
+    float spent = mod_property_override::BudgetSpent(rows, "paragon");
+    float chunkCost = mod_property_override::PropertyWeight(prop) *
+                      static_cast<float>(def->chunk);
     if (spent + chunkCost > budget + 0.001f)
     {
         ch.PSendSysMessage("|cffffd100[Paragon]|r {} has no room for that upgrade "
@@ -409,14 +410,15 @@ bool ParagonMgr::TryPurchaseItemUpgrade(Player* player, Item* item, upgrades::Pr
 
     int32 current = 0;
     for (auto const& row : rows)
-        if (row.property == static_cast<uint8>(prop))
+        if (row.source == "paragon" && row.property == static_cast<uint8>(prop))
         {
             current = row.value;
             break;
         }
 
     player->DestroyItemCount(_coinItemId, coins, true);
-    if (!props.AddOverride(player, item, prop, current + static_cast<int32>(def->chunk), 0))
+    if (!props.AddOverride(player, item, "paragon", prop,
+                           current + static_cast<int32>(def->chunk), 0))
     {
         LOG_WARN("module", "mod-paragon: AddOverride failed for item {} (player {})",
                  itemGuid, player->GetGUID().GetCounter());

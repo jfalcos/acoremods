@@ -26,13 +26,16 @@ the client caches.
 
 ## Two target kinds
 
-- **Item-target** rows (`item_property_override`, keyed by `item_instance.guid`):
-  active while that item is equipped. Foundation for item upgrades/mixing.
+- **Item-target** rows (`item_property_override`, keyed by `item_instance.guid`
+  + `source`): active while that item is equipped. Foundation for item
+  upgrades (source `'paragon'`) and infusions (source `'mix'`).
 - **Player-target** rows (`player_property_override`, keyed by character guid +
   `source`): active while the character is online. Foundation for AA and
-  mount-progression buffs. `source` ('gm', 'mount', 'aa', ...) namespaces which
-  system owns each row — systems clear only their own rows, and the same
-  property from different sources stacks additively.
+  mount-progression buffs.
+
+Both kinds are `source`-namespaced ('gm', 'mount', 'paragon', 'mix', ...):
+systems budget and clear only their own rows, and the same property from
+different sources stacks additively.
 
 ## API for other modules (world-thread only)
 
@@ -40,20 +43,31 @@ the client caches.
 auto& mgr = mod_property_override::PropertyOverrideMgr::Instance();
 mgr.SetPlayerOverride(player, "mount", Property::AttackPower, 120, 0); // 0 = permanent
 mgr.ClearPlayerOverrides(player, "mount");
+mgr.AddOverride(player, item, "paragon", Property::Stamina, 15, 0);    // item-target
 ```
 
 Rows persist in the characters DB, survive relogs, and are purged
 transactionally on character deletion (`OnPlayerDeleteFromDB`).
 
-Known consumers: `mod-mount-progression` (source `'mount'`, permanent rows for
-the active-mount bond). Modules that include this header require this module
-to be present in the build.
+Two shared consumer-facing units also live here:
+
+- `PropertyOverrideItemization.h` — pure itemization facts:
+  `PropertyWeight` (Blizzard stat costs, tri-ratings 3x), `NativeBudget`
+  (corpus-fitted budget per Quality/ItemLevel), `BudgetSpent(rows, source)`.
+- `PropertyOverrideDisplay.h` — the parchment-gossip toolkit (dark palette,
+  `QualityColor`, `FormatStatDisplay` "Total (base+bonus)" rows with live
+  rating-% previews) so every consumer NPC UI renders stats identically.
+
+Known consumers: `mod-mount-progression` (source `'mount'`), `mod-paragon`
+(player source `'paragon'` for perks, item source `'paragon'` for coin
+upgrades), `mod-item-infusion` (item source `'mix'`). Modules that include
+these headers require this module to be present in the build.
 
 ## GM commands (stand-in for the future purchase UI)
 
 ```
-.propover add <slot> <property> <value> [durationSecs]     item-target
-.propover clear <slot>
+.propover add <slot> <property> <value> [durationSecs]     item-target (source 'gm')
+.propover clear <slot> [source]                            omit source = all systems' rows
 .propover list <slot>
 .propover padd <property> <value> [durationSecs]           player-target (selected player or self, source 'gm')
 .propover pclear [source]
@@ -76,7 +90,6 @@ resistances — the apply path mirrors `Player::_ApplyItemBonuses`.
   need their own design pass. Use ratings instead.
 - Items traded/mailed to another character activate for the new owner at their
   next login (the load joins `item_instance` for live ownership).
-- No purchase UI/currency — GM commands only.
 
 No core patches required; all hooks are stock. Tests are pure-logic gtest
 suites registered via `mod-property-override.cmake` (build with

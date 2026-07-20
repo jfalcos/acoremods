@@ -1,0 +1,55 @@
+###############################################################################
+# mod-item-infusion — sacrifice gear to empower gear, at the risk of losing it
+###############################################################################
+#
+# Infusion transfers a fraction of a donor item's native stats onto a target
+# item as permanent per-instance bonuses (mod-property-override rows,
+# source 'mix'). The donor is always destroyed. Each attempt rolls against a
+# destruction chance for the TARGET that grows the more the target has
+# already been infused — risk is the balance mechanism instead of a hard cap
+# (mod-paragon's coin upgrades keep their hard 30% cap; infusion can go
+# beyond it if you keep winning the roll).
+#
+# Risk model:
+#   f     = target's accumulated mix points / native (Quality, ItemLevel)
+#           stat budget (same corpus-fitted budget the paragon cap uses)
+#   risk  = clamp(BasePercent + SlopePercent * (f / PivotPercent)^Exponent,
+#                 BasePercent, MaxPercent)
+#   Defaults: 5% on a fresh item, 50% once mix fill reaches the paragon-cap-
+#   equivalent 30%, growing toward 90% beyond it.
+# Mitigation (chosen per attempt, consumed win or lose):
+#   each Paragon Coin: -CoinReductionPercent risk
+#   each substance:    its configured reduction
+#   floored at FloorPercent — no attempt is ever fully safe.
+
+ItemInfusion.Enable = 1
+ItemInfusion.Debug = 0
+
+# Minimum character level to infuse (matches mod-paragon's perk gate).
+ItemInfusion.MinLevel = 30
+
+# Creature entry of the Alchemist NPC offering the gossip UI.
+ItemInfusion.AlchemistEntry = 96010
+
+# Percent of the donor's native stats transferred (ceil-rounded per stat).
+# 35% keeps a same-ilvl donor's contribution comparable to one or two coin
+# upgrades, so sacrificing gear competes with (not dominates) the coin path.
+ItemInfusion.EfficiencyPercent = 35
+
+# Risk curve (see model above).
+ItemInfusion.Risk.BasePercent = 5
+ItemInfusion.Risk.SlopePercent = 45
+ItemInfusion.Risk.PivotPercent = 30
+ItemInfusion.Risk.Exponent = 1.6
+ItemInfusion.Risk.MaxPercent = 90
+ItemInfusion.Risk.FloorPercent = 2
+
+# Risk removed per Paragon Coin pledged on the attempt.
+ItemInfusion.CoinReductionPercent = 5
+
+# Stabilizing substances: "itemId:riskReductionPercent,..." — native
+# consumables handed over per attempt. Defaults are era-appropriate alchemy
+# goods: 33447 Runic Healing Potion (-5), 33448 Runic Mana Potion (-5),
+# 36906 Frost Lotus (-10), 35625 Eternal Life (-20). Ids without a live
+# item_template row are ignored at the menu.
+ItemInfusion.Substances = "33447:5,33448:5,36906:10,35625:20"

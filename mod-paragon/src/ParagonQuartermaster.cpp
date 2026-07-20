@@ -1,4 +1,5 @@
 #include "ParagonMgr.h"
+#include "PropertyOverrideDisplay.h"
 #include "RewardDispatcher.h"
 
 #include "Chat.h"
@@ -10,7 +11,6 @@
 #include "ScriptMgr.h"
 
 #include <fmt/format.h>
-#include <optional>
 
 using namespace mod_paragon;
 using mod_property_override::PropertyName;
@@ -46,121 +46,15 @@ namespace
         }
     }
 
-    // Gossip color palette. The gossip frame is LIGHT parchment with dark
-    // default text, so accents must be DARK to stay readable (bright chat
-    // colors wash out here). Before/after is a muted-gray -> dark-green pair.
-    // User-validated on the parchment: dark green reads well, epic purple
-    // ok; mid grays and goldenrod wash out. So: "now" values take the plain
-    // default dark text (color marks only what changes), dead rows use a
-    // near-black gray, costs a deep bronze.
-    constexpr char const* COL_GRAY  = "|cff333333"; // dead rows only
-    constexpr char const* COL_GREEN = "|cff0a4a0a"; // "after" values
-    constexpr char const* COL_COST  = "|cff4b0082"; // costs, budgets: deep violet (user pick)
-    constexpr char const* COL_END   = "|r";
-
-    // Item quality colors, darkened where the canonical shade is too light
-    // for parchment. Common quality inherits the default dark text.
-    char const* QualityColor(uint32 quality)
-    {
-        switch (quality)
-        {
-            case 0: return "|cff333333";
-            case 1: return "";           // default dark text
-            case 2: return "|cff0f5c0f"; // uncommon, darkened
-            case 3: return "|cff004a99";
-            case 4: return "|cff5c1a99";
-            case 5: return "|cff8a4a00"; // legendary, darkened
-            default: return "";
-        }
-    }
-
-    struct LiveValue
-    {
-        double now;
-        double delta;
-        bool percent;
-    };
-
-    // Best-effort live character value + the delta this purchase adds.
-    // Rating percents are derived from the player's own current
-    // rating->bonus ratio, so no private APIs needed. std::nullopt when no
-    // clean single value exists (tri-ratings, regen, zero ratings).
-    std::optional<LiveValue> LiveValueFor(Player* player, upgrades::Property prop, uint32 chunk)
-    {
-        using P = upgrades::Property;
-        auto flat = [&](double now) -> std::optional<LiveValue>
-        { return LiveValue{ now, static_cast<double>(chunk), false }; };
-        auto stat = [&](Stats s) { return flat(player->GetStat(s)); };
-        auto rating = [&](CombatRating cr) -> std::optional<LiveValue>
-        {
-            uint32 cur = player->GetUInt32Value(PLAYER_FIELD_COMBAT_RATING_1 + cr);
-            float bonus = player->GetRatingBonusValue(cr);
-            if (!cur || bonus <= 0.f)
-                return std::nullopt;
-            double delta = bonus * static_cast<double>(chunk) / static_cast<double>(cur);
-            return LiveValue{ bonus, delta, true };
-        };
-
-        switch (prop)
-        {
-            case P::Strength:  return stat(STAT_STRENGTH);
-            case P::Agility:   return stat(STAT_AGILITY);
-            case P::Stamina:   return stat(STAT_STAMINA);
-            case P::Intellect: return stat(STAT_INTELLECT);
-            case P::Spirit:    return stat(STAT_SPIRIT);
-            case P::Health:            return flat(player->GetMaxHealth());
-            case P::Mana:              return flat(player->GetMaxPower(POWER_MANA));
-            case P::AttackPower:       return flat(player->GetTotalAttackPowerValue(BASE_ATTACK));
-            case P::RangedAttackPower: return flat(player->GetTotalAttackPowerValue(RANGED_ATTACK));
-            case P::SpellPower:        return flat(player->SpellBaseDamageBonusDone(SPELL_SCHOOL_MASK_SPELL));
-            case P::Armor:             return flat(player->GetArmor());
-            case P::HolyResistance:    return flat(player->GetResistance(SPELL_SCHOOL_HOLY));
-            case P::FireResistance:    return flat(player->GetResistance(SPELL_SCHOOL_FIRE));
-            case P::NatureResistance:  return flat(player->GetResistance(SPELL_SCHOOL_NATURE));
-            case P::FrostResistance:   return flat(player->GetResistance(SPELL_SCHOOL_FROST));
-            case P::ShadowResistance:  return flat(player->GetResistance(SPELL_SCHOOL_SHADOW));
-            case P::ArcaneResistance:  return flat(player->GetResistance(SPELL_SCHOOL_ARCANE));
-            case P::DefenseRating:     return rating(CR_DEFENSE_SKILL);
-            case P::DodgeRating:       return rating(CR_DODGE);
-            case P::ParryRating:       return rating(CR_PARRY);
-            case P::BlockRating:       return rating(CR_BLOCK);
-            case P::HitMeleeRating:    return rating(CR_HIT_MELEE);
-            case P::HitRangedRating:   return rating(CR_HIT_RANGED);
-            case P::HitSpellRating:    return rating(CR_HIT_SPELL);
-            case P::CritMeleeRating:   return rating(CR_CRIT_MELEE);
-            case P::CritRangedRating:  return rating(CR_CRIT_RANGED);
-            case P::CritSpellRating:   return rating(CR_CRIT_SPELL);
-            case P::HasteMeleeRating:  return rating(CR_HASTE_MELEE);
-            case P::HasteRangedRating: return rating(CR_HASTE_RANGED);
-            case P::HasteSpellRating:  return rating(CR_HASTE_SPELL);
-            case P::ExpertiseRating:   return rating(CR_EXPERTISE);
-            case P::ArmorPenetrationRating: return rating(CR_ARMOR_PENETRATION);
-            default:
-                return std::nullopt; // tri-ratings, regen, spell pen: no clean single value
-        }
-    }
-
-    // WoW-convention stat display: "Total (base+bonus)" with the modified
-    // total and the bonus in green, e.g. "Agility: 161 (156+5)". Falls back
-    // to the item-bonus form "+15 (+10+5)" when no live value exists.
-    std::string FormatStatDisplay(Player* player, upgrades::Property prop,
-                                  uint32 chunk, int32 currentBonus)
-    {
-        if (auto live = LiveValueFor(player, prop, chunk))
-        {
-            if (live->percent)
-                return fmt::format("{}{:.1f}%{} ({:.1f}%+{}{:.1f}%{})",
-                                   COL_GREEN, live->now + live->delta, COL_END,
-                                   live->now, COL_GREEN, live->delta, COL_END);
-            return fmt::format("{}{}{} ({}+{}{}{})",
-                               COL_GREEN, static_cast<int64>(live->now + live->delta), COL_END,
-                               static_cast<int64>(live->now),
-                               COL_GREEN, static_cast<int64>(live->delta), COL_END);
-        }
-        return fmt::format("{}+{}{} (+{}+{}{}{})",
-                           COL_GREEN, currentBonus + static_cast<int32>(chunk), COL_END,
-                           currentBonus, COL_GREEN, chunk, COL_END);
-    }
+    // Palette, QualityColor, and stat-display formatting are the shared
+    // parchment-surface toolkit in PropertyOverrideDisplay.h (extracted from
+    // this file when the Alchemist became a second consumer).
+    using mod_property_override::display::COL_GRAY;
+    using mod_property_override::display::COL_GREEN;
+    using mod_property_override::display::COL_COST;
+    using mod_property_override::display::COL_END;
+    using mod_property_override::display::QualityColor;
+    using mod_property_override::display::FormatStatDisplay;
 
     enum QmSenders
     {
@@ -224,8 +118,8 @@ namespace
             ItemTemplate const* proto = item->GetTemplate();
             float budget = upgrades::UpgradeBudget(pm.UpgradeCfg(),
                                                    proto->Quality, proto->ItemLevel);
-            float spent = upgrades::BudgetSpent(
-                props.GetActiveOverrides(player, item->GetGUID().GetCounter()));
+            float spent = mod_property_override::BudgetSpent(
+                props.GetActiveOverrides(player, item->GetGUID().GetCounter()), "paragon");
             // Keep the quality-colored name readable in all cases; annotate
             // WHY an item can't take upgrades instead of graying the row out.
             std::string label;
@@ -295,7 +189,7 @@ namespace
         auto rows = props.GetActiveOverrides(player, item->GetGUID().GetCounter());
         float budget = upgrades::UpgradeBudget(pm.UpgradeCfg(),
                                                proto->Quality, proto->ItemLevel);
-        float spent = upgrades::BudgetSpent(rows);
+        float spent = mod_property_override::BudgetSpent(rows, "paragon");
         uint32 coins = upgrades::CostForNextChunk(budget > 0.f ? spent / budget : 1.f);
 
         ClearGossipMenuFor(player);
@@ -309,7 +203,7 @@ namespace
         {
             int32 current = 0;
             for (auto const& row : rows)
-                if (row.property == static_cast<uint8>(def.prop))
+                if (row.source == "paragon" && row.property == static_cast<uint8>(def.prop))
                 {
                     current = row.value;
                     break;
@@ -317,7 +211,8 @@ namespace
             // Row grammar: name, item bonus gray(now) green(after), your
             // character total in parens same pairing, cost in gold. Rows the
             // budget can't fit go entirely gray.
-            float chunkCost = def.weight * static_cast<float>(def.chunk);
+            float chunkCost = mod_property_override::PropertyWeight(def.prop) *
+                              static_cast<float>(def.chunk);
             bool fits = spent + chunkCost <= budget + 0.001f;
             std::string label;
             if (!fits)
