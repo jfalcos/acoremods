@@ -4,6 +4,7 @@
 #include "ObjectGuid.h"
 #include "PropertyOverrideProperties.h"
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -27,6 +28,26 @@ struct AppliedRow
     uint8 property;
     float value;
 };
+
+// Player-target override row. `source` namespaces the owning system
+// ('gm', 'mount', 'aa', ...): systems clear their own rows without touching
+// each other's, and the same property from different sources stacks
+// additively.
+struct PlayerRow
+{
+    std::string source;
+    uint8 property;
+    int32 value;
+    uint64 expiry; // unix seconds, 0 = permanent
+
+    bool IsExpired(uint64 now) const { return expiry != 0 && now >= expiry; }
+};
+
+// True for 1-16 chars of [a-z0-9_] (source strings end up in SQL and the PK).
+bool IsValidSource(std::string_view source);
+
+// Non-expired subset, preserving order; pure and unit-testable.
+std::vector<PlayerRow> FilterLivePlayerRows(std::vector<PlayerRow> const& rows, uint64 now);
 
 // Snapshot of what was actually applied for one equipped item. Unapply
 // always subtracts this snapshot (never re-reads the override cache), so
@@ -92,6 +113,15 @@ public:
     // Non-expired rows for an item of this (online) owner. Empty if none.
     std::vector<OverrideRow> GetActiveOverrides(Player* owner, ObjectGuid::LowType itemGuid) const;
 
+    // Player-target API (what mount progression / AA will call).
+    // Value 0 with an existing row keeps the row (explicit clear removes it).
+    bool SetPlayerOverride(Player* player, std::string_view source, Property prop,
+                           int32 value, uint32 durationSecs);
+    bool ClearPlayerOverrides(Player* player, std::string_view source);
+
+    // Non-expired player-target rows, all sources. Empty if none.
+    std::vector<PlayerRow> GetPlayerOverrides(Player* player) const;
+
     // Whisper-to-self LANG_ADDON packet to this player's client.
     void SendAddonMessage(Player* player, std::string const& payload) const;
 
@@ -102,12 +132,25 @@ private:
     {
         ItemOverrideMap overrides; // by item guid, loaded at login
         AppliedMap applied;        // by item guid, snapshots of live stats
+        // Player-target rows (wholesale-resynced; see PlayerResync).
+        std::vector<PlayerRow> playerRows;
+        std::vector<AppliedRow> playerApplied;
+        uint64 playerMinExpiry = 0; // earliest non-zero expiry, 0 = none
         uint32 reconcileTimerMs = 0;
     };
 
     void ApplyItem(Player* player, PlayerState& state, ObjectGuid::LowType itemGuid, uint64 now);
     void UnapplyItem(Player* player, PlayerState& state, ObjectGuid::LowType itemGuid);
     void PruneExpiredRows(PlayerState& state, ObjectGuid::LowType itemGuid, uint64 now);
+
+    // Player-target lifecycle: unlike items (fragmented removal hooks →
+    // diff-sync), player rows change only via the API and expiry, so a
+    // wholesale subtract-snapshot / reapply-live resync is exactly-once by
+    // construction. Same-tick unapply+apply causes no client flicker
+    // (update fields are batched per world tick).
+    void PlayerResync(Player* player, PlayerState& state);
+    void PruneExpiredPlayerRows(Player* player, PlayerState& state, uint64 now);
+
     static void ApplyStat(Player* player, uint8 property, float value, bool apply);
 
     std::unordered_map<ObjectGuid::LowType, PlayerState> _players; // by player guid

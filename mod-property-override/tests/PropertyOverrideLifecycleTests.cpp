@@ -132,6 +132,53 @@ TEST(Lifecycle, EquippedItemWithOnlyExpiredRowsNeverApplies)
     EXPECT_TRUE(a.expired.empty());
 }
 
+TEST(PlayerRows, SourceValidation)
+{
+    EXPECT_TRUE(IsValidSource("gm"));
+    EXPECT_TRUE(IsValidSource("mount"));
+    EXPECT_TRUE(IsValidSource("aa_perk_track"));
+    EXPECT_TRUE(IsValidSource("a123456789012345")); // 16 chars
+    EXPECT_FALSE(IsValidSource(""));
+    EXPECT_FALSE(IsValidSource("a1234567890123456")); // 17 chars
+    EXPECT_FALSE(IsValidSource("GM"));       // uppercase
+    EXPECT_FALSE(IsValidSource("mo unt"));   // space
+    EXPECT_FALSE(IsValidSource("x'; --"));   // sql-ish
+}
+
+TEST(PlayerRows, FilterKeepsLiveDropsExpired)
+{
+    std::vector<PlayerRow> rows =
+    {
+        { "gm",    7,  50, 0 },    // permanent
+        { "mount", 38, 30, 500 },  // expired at now=1000
+        { "aa",    45, 20, 2000 }, // still live
+    };
+    auto live = FilterLivePlayerRows(rows, 1000);
+    ASSERT_EQ(live.size(), 2u);
+    EXPECT_EQ(live[0].source, "gm");
+    EXPECT_EQ(live[1].source, "aa");
+}
+
+TEST(PlayerRows, SamePropertyFromTwoSourcesAreDistinctRows)
+{
+    // Stacking rule: (source, property) is the key; same property from two
+    // sources coexists and applies additively.
+    std::vector<PlayerRow> rows =
+    {
+        { "gm",    7, 50, 0 },
+        { "mount", 7, 25, 0 },
+    };
+    auto live = FilterLivePlayerRows(rows, 1000);
+    ASSERT_EQ(live.size(), 2u);
+    EXPECT_EQ(live[0].property, live[1].property);
+    EXPECT_NE(live[0].source, live[1].source);
+}
+
+TEST(PlayerRows, FilterOnEmptyIsEmpty)
+{
+    EXPECT_TRUE(FilterLivePlayerRows({}, 1000).empty());
+}
+
 TEST(Lifecycle, IdempotentAfterActionsAreExecuted)
 {
     ItemOverrideMap overrides;

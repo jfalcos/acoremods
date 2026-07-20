@@ -11,6 +11,26 @@
 namespace mod_property_override
 {
 
+bool IsValidSource(std::string_view source)
+{
+    if (source.empty() || source.size() > 16)
+        return false;
+    for (char c : source)
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+            return false;
+    return true;
+}
+
+std::vector<PlayerRow> FilterLivePlayerRows(std::vector<PlayerRow> const& rows, uint64 now)
+{
+    std::vector<PlayerRow> live;
+    live.reserve(rows.size());
+    for (PlayerRow const& row : rows)
+        if (!row.IsExpired(now))
+            live.push_back(row);
+    return live;
+}
+
 SyncActions ComputeSyncActions(ItemOverrideMap const& overrides,
                                AppliedMap const& applied,
                                std::vector<ObjectGuid::LowType> const& equipped,

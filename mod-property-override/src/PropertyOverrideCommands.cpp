@@ -156,6 +156,111 @@ namespace
         return true;
     }
 
+    Player* GetTargetPlayer(ChatHandler* handler)
+    {
+        Player* target = handler->getSelectedPlayerOrSelf();
+        if (!target)
+            handler->SendSysMessage("No player target.");
+        return target;
+    }
+
+    bool HandlePlayerAddCmd(ChatHandler* handler, char const* args)
+    {
+        auto& mgr = PropertyOverrideMgr::Instance();
+        if (!mgr.IsEnabled())
+        {
+            handler->SendSysMessage("Property overrides are disabled.");
+            return true;
+        }
+
+        std::istringstream in(args ? args : "");
+        std::string propToken;
+        int32 value = 0;
+        uint32 duration = 0;
+        if (!(in >> propToken >> value))
+        {
+            handler->SendSysMessage("Usage: .propover padd <property> <value> [durationSecs]");
+            handler->SendSysMessage("Targets the selected player, or yourself. See .propover props");
+            return true;
+        }
+        in >> duration; // optional
+
+        std::optional<Property> prop = ParseProperty(propToken);
+        if (!prop)
+        {
+            handler->PSendSysMessage("Unknown property '{}'.", propToken);
+            return true;
+        }
+
+        Player* target = GetTargetPlayer(handler);
+        if (!target)
+            return true;
+
+        if (!mgr.SetPlayerOverride(target, "gm", *prop, value, duration))
+        {
+            handler->SendSysMessage("Failed to set player override.");
+            return true;
+        }
+
+        if (duration)
+            handler->PSendSysMessage("{}: {} {:+d} for {}s (source gm).",
+                                     target->GetName(), PropertyName(*prop), value, duration);
+        else
+            handler->PSendSysMessage("{}: {} {:+d} permanent (source gm).",
+                                     target->GetName(), PropertyName(*prop), value);
+        return true;
+    }
+
+    bool HandlePlayerClearCmd(ChatHandler* handler, char const* args)
+    {
+        std::istringstream in(args ? args : "");
+        std::string source = "gm";
+        in >> source; // optional explicit source; defaults to gm
+
+        Player* target = GetTargetPlayer(handler);
+        if (!target)
+            return true;
+
+        bool hadAny = PropertyOverrideMgr::Instance().ClearPlayerOverrides(target, source);
+        if (hadAny)
+            handler->PSendSysMessage("Cleared source '{}' overrides on {}.",
+                                     source, target->GetName());
+        else
+            handler->PSendSysMessage("No source '{}' overrides on {}.",
+                                     source, target->GetName());
+        return true;
+    }
+
+    bool HandlePlayerListCmd(ChatHandler* handler, char const* /*args*/)
+    {
+        Player* target = GetTargetPlayer(handler);
+        if (!target)
+            return true;
+
+        auto rows = PropertyOverrideMgr::Instance().GetPlayerOverrides(target);
+        if (rows.empty())
+        {
+            handler->PSendSysMessage("No player overrides on {}.", target->GetName());
+            return true;
+        }
+
+        handler->PSendSysMessage("Player overrides on {}:", target->GetName());
+        for (PlayerRow const& row : rows)
+        {
+            if (row.expiry)
+                handler->PSendSysMessage("  [{}] {} {:+d} (expires at {})",
+                                         row.source,
+                                         PropertyName(static_cast<Property>(row.property)),
+                                         row.value, row.expiry);
+            else
+                handler->PSendSysMessage("  [{}] {} {:+d} (permanent)",
+                                         row.source,
+                                         PropertyName(static_cast<Property>(row.property)),
+                                         row.value);
+        }
+        return true;
+    }
+
     bool HandlePropsCmd(ChatHandler* handler, char const* /*args*/)
     {
         std::string line;
@@ -187,10 +292,13 @@ namespace
         {
             static ChatCommandTable sub =
             {
-                { "add",   HandleAddCmd,   SEC_GAMEMASTER, Console::No },
-                { "clear", HandleClearCmd, SEC_GAMEMASTER, Console::No },
-                { "list",  HandleListCmd,  SEC_GAMEMASTER, Console::No },
-                { "props", HandlePropsCmd, SEC_GAMEMASTER, Console::No },
+                { "add",    HandleAddCmd,         SEC_GAMEMASTER, Console::No },
+                { "clear",  HandleClearCmd,       SEC_GAMEMASTER, Console::No },
+                { "list",   HandleListCmd,        SEC_GAMEMASTER, Console::No },
+                { "props",  HandlePropsCmd,       SEC_GAMEMASTER, Console::No },
+                { "padd",   HandlePlayerAddCmd,   SEC_GAMEMASTER, Console::No },
+                { "pclear", HandlePlayerClearCmd, SEC_GAMEMASTER, Console::No },
+                { "plist",  HandlePlayerListCmd,  SEC_GAMEMASTER, Console::No },
             };
             static ChatCommandTable root =
             {

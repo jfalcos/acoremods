@@ -24,12 +24,37 @@ the client caches.
   `Interface/AddOns/`. Without the addon, stats still work — tooltips just
   don't show them.
 
+## Two target kinds
+
+- **Item-target** rows (`item_property_override`, keyed by `item_instance.guid`):
+  active while that item is equipped. Foundation for item upgrades/mixing.
+- **Player-target** rows (`player_property_override`, keyed by character guid +
+  `source`): active while the character is online. Foundation for AA and
+  mount-progression buffs. `source` ('gm', 'mount', 'aa', ...) namespaces which
+  system owns each row — systems clear only their own rows, and the same
+  property from different sources stacks additively.
+
+## API for other modules (world-thread only)
+
+```cpp
+auto& mgr = mod_property_override::PropertyOverrideMgr::Instance();
+mgr.SetPlayerOverride(player, "mount", Property::AttackPower, 120, 0); // 0 = permanent
+mgr.ClearPlayerOverrides(player, "mount");
+```
+
+Rows persist in the characters DB, survive relogs, and are purged
+transactionally on character deletion (`OnPlayerDeleteFromDB`).
+
 ## GM commands (stand-in for the future purchase UI)
 
 ```
-.propover add <slot> <property> <value> [durationSecs]
+.propover add <slot> <property> <value> [durationSecs]     item-target
 .propover clear <slot>
 .propover list <slot>
+.propover padd <property> <value> [durationSecs]           player-target (selected player or self, source 'gm')
+.propover pclear [source]
+.propover plist
+.propover props                                            list all properties
 ```
 
 `<slot>` = server equipment slot 0-18 (15 = main hand). `<property>` = a name

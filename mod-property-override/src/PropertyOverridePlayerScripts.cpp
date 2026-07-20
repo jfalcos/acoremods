@@ -79,6 +79,19 @@ namespace
             PropertyOverrideMgr::Instance().OnPlayerTick(player, diffMs);
         }
 
+        // Fires inside the CHAR_DELETE_REMOVE transaction (Player.cpp
+        // DeleteFromDB), before commit; the recycle-bin path re-fires it at
+        // final purge. Touch only the transaction — may run for offline
+        // characters, so no manager state is involved.
+        void OnPlayerDeleteFromDB(CharacterDatabaseTransaction trans, uint32 guid) override
+        {
+            trans->Append("DELETE FROM player_property_override WHERE player_guid = {}", guid);
+            // Best-effort for the character's item rows (char deletion removes
+            // item_instance wholesale without per-item hooks); the startup
+            // orphan sweep is the backstop for traded-away stale owners.
+            trans->Append("DELETE FROM item_property_override WHERE owner_guid = {}", guid);
+        }
+
         // Addon channel: the PropertyOverlay addon whispers itself with an
         // "IPROP\t..." LANG_ADDON message. Consume it (return false so it is
         // never delivered/echoed) and reply on the same channel.
