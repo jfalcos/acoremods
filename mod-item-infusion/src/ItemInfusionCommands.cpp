@@ -8,6 +8,8 @@
 #include "Player.h"
 #include "ScriptMgr.h"
 
+#include <fmt/format.h>
+
 #include <sstream>
 
 using namespace Acore::ChatCommands;
@@ -114,9 +116,14 @@ namespace
         float mixPts = mod_property_override::BudgetSpent(rows, "mix");
         float f = MixFraction(rows, proto->Quality, proto->ItemLevel);
 
-        handler->PSendSysMessage("{} - |cffffd100infused {:.0f} pts, next risk {:.0f}%|r:",
+        float penalty = mgr.MasteryPenaltyFor(player, proto);
+        handler->PSendSysMessage("{} - |cffffd100infused {:.0f} pts, next risk {:.0f}%|r{}:",
                                  proto->Name1, mixPts,
-                                 RiskFor(mgr.Cfg(), f) * 100.f);
+                                 RiskFor(mgr.Cfg(), f, penalty) * 100.f,
+                                 penalty > 0.f
+                                     ? fmt::format(" (includes |cffff2020+{:.0f}%|r mastery)",
+                                                   penalty * 100.f)
+                                     : "");
         bool any = false;
         for (auto const& row : rows)
             if (row.source == "mix")

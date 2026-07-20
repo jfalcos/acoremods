@@ -60,8 +60,14 @@ void ItemInfusionMgr::LoadConfig()
 {
     _enabled = sConfigMgr->GetOption<bool>("ItemInfusion.Enable", true);
     _debug = sConfigMgr->GetOption<bool>("ItemInfusion.Debug", false);
-    _minLevel = sConfigMgr->GetOption<uint32>("ItemInfusion.MinLevel", 30);
+    _minLevel = sConfigMgr->GetOption<uint32>("ItemInfusion.MinLevel", 10);
     _alchemistEntry = sConfigMgr->GetOption<uint32>("ItemInfusion.AlchemistEntry", 96010);
+    _cfg.masteryGrace = sConfigMgr->GetOption<uint32>("ItemInfusion.Mastery.GraceLevels", 10);
+    _cfg.masteryPenaltyPerLevel =
+        sConfigMgr->GetOption<uint32>("ItemInfusion.Mastery.PenaltyPerLevelPercent", 2) / 100.0f;
+    _cfg.masteryPenaltyMax =
+        sConfigMgr->GetOption<uint32>("ItemInfusion.Mastery.MaxPenaltyPercent", 30) / 100.0f;
+    _masteredAtLevel = sConfigMgr->GetOption<uint32>("ItemInfusion.Mastery.MasteredAtLevel", 80);
     _cfg.efficiency =
         sConfigMgr->GetOption<uint32>("ItemInfusion.EfficiencyPercent", 35) / 100.0f;
     _cfg.riskBase =
@@ -78,15 +84,19 @@ void ItemInfusionMgr::LoadConfig()
     _cfg.coinReduction =
         sConfigMgr->GetOption<uint32>("ItemInfusion.CoinReductionPercent", 5) / 100.0f;
     _substances = ParseSubstances(sConfigMgr->GetOption<std::string>(
-        "ItemInfusion.Substances", "33447:5,33448:5,36906:10,35625:20"));
+        "ItemInfusion.Substances",
+        "118:5,858:5,3928:5,33447:5,33448:5,36906:10,35625:20"));
 
     LOG_INFO("module",
              "mod-item-infusion: enable={} minLevel={} alchemist={} eff={:.2f} "
              "risk(base={:.2f} slope={:.2f} pivot={:.2f} exp={:.1f} max={:.2f} "
-             "floor={:.2f}) coinRed={:.2f} substances={}",
+             "floor={:.2f}) coinRed={:.2f} mastery(grace={} perLvl={:.2f} "
+             "max={:.2f} masteredAt={}) substances={}",
              _enabled, _minLevel, _alchemistEntry, _cfg.efficiency,
              _cfg.riskBase, _cfg.riskSlope, _cfg.riskPivot, _cfg.riskExp,
-             _cfg.riskMax, _cfg.riskFloor, _cfg.coinReduction, _substances.size());
+             _cfg.riskMax, _cfg.riskFloor, _cfg.coinReduction,
+             _cfg.masteryGrace, _cfg.masteryPenaltyPerLevel,
+             _cfg.masteryPenaltyMax, _masteredAtLevel, _substances.size());
 }
 
 uint32 ItemInfusionMgr::CoinItemId() const
@@ -115,6 +125,20 @@ std::vector<DonorStat> ItemInfusionMgr::CollectDonorStats(ItemTemplate const* pr
     push(105, proto->ShadowRes);
     push(106, proto->ArcaneRes);
     return stats;
+}
+
+float ItemInfusionMgr::MasteryPenaltyFor(Player* player, ItemTemplate const* target,
+                                         ItemTemplate const* donor) const
+{
+    if (!player || !target)
+        return 0.f;
+    uint32 level = player->GetLevel();
+    if (_masteredAtLevel && level >= _masteredAtLevel)
+        return 0.f;
+    uint32 reqLevel = target->RequiredLevel;
+    if (donor)
+        reqLevel = std::max(reqLevel, donor->RequiredLevel);
+    return MasteryPenalty(_cfg, level, reqLevel);
 }
 
 ItemInfusionMgr::InfuseResult ItemInfusionMgr::TryInfuse(
@@ -185,9 +209,13 @@ ItemInfusionMgr::InfuseResult ItemInfusionMgr::TryInfuse(
     auto& props = mod_property_override::PropertyOverrideMgr::Instance();
     auto rows = props.GetActiveOverrides(player, target->GetGUID().GetCounter());
     float f = MixFraction(rows, tproto->Quality, tproto->ItemLevel);
-    float risk = MitigatedRisk(_cfg, RiskFor(_cfg, f), coins, reductions);
+    float penalty = MasteryPenaltyFor(player, tproto, dproto);
+    float risk = MitigatedRisk(_cfg, RiskFor(_cfg, f, penalty), coins, reductions);
     if (_riskOverridePct >= 0)
         risk = std::min(static_cast<float>(_riskOverridePct) / 100.f, 1.f);
+    else if (penalty > 0.f)
+        ch.PSendSysMessage("|cffffd100[Infusion]|r This gear is beyond your mastery: "
+                           "|cffff2020+{:.0f}%|r risk.", penalty * 100.f);
 
     // The price is paid win or lose: mitigation materials and the donor.
     if (coins)
@@ -233,7 +261,7 @@ ItemInfusionMgr::InfuseResult ItemInfusionMgr::TryInfuse(
     ch.PSendSysMessage("|cffffd100[Infusion]|r {} absorbs {}: {}. "
                        "Next infusion risk: {:.0f}%.",
                        tproto->Name1, donorName, gains,
-                       RiskFor(_cfg, newF) * 100.f);
+                       RiskFor(_cfg, newF, MasteryPenaltyFor(player, tproto)) * 100.f);
     return InfuseResult::Survived;
 }
 

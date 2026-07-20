@@ -25,8 +25,25 @@
 ItemInfusion.Enable = 1
 ItemInfusion.Debug = 0
 
-# Minimum character level to infuse (matches mod-paragon's perk gate).
-ItemInfusion.MinLevel = 30
+# Minimum character level to infuse. Low on purpose: the mastery penalty
+# below (not this gate) is what protects low levels from gear beyond them,
+# and the lowbie loop — feeding offspec quest rewards into your weapon at
+# ~5% risk — is meant to be available early.
+ItemInfusion.MinLevel = 10
+
+# Mastery: gear beyond the character's level is riskier to infuse. An item
+# counts as mastered once charLevel >= item RequiredLevel + GraceLevels;
+# below that, each missing level adds PenaltyPerLevelPercent risk, capped
+# at MaxPenaltyPercent. The WORSE of target and donor decides (so neither
+# end of a twink-funnel can be smuggled). Characters at or above
+# MasteredAtLevel are exempt (0 disables the exemption) — with the default
+# 80, endgame risk math is identical to the pre-mastery tuning.
+# Worked examples (defaults): L25 on own L20 gear -> +0%; L25 fed a L40
+# BoE donor -> +30% (capped); L80 on anything -> +0%.
+ItemInfusion.Mastery.GraceLevels = 10
+ItemInfusion.Mastery.PenaltyPerLevelPercent = 2
+ItemInfusion.Mastery.MaxPenaltyPercent = 30
+ItemInfusion.Mastery.MasteredAtLevel = 80
 
 # Creature entry of the Alchemist NPC offering the gossip UI.
 ItemInfusion.AlchemistEntry = 96010
@@ -48,8 +65,11 @@ ItemInfusion.Risk.FloorPercent = 2
 ItemInfusion.CoinReductionPercent = 5
 
 # Stabilizing substances: "itemId:riskReductionPercent,..." — native
-# consumables handed over per attempt. Defaults are era-appropriate alchemy
-# goods: 33447 Runic Healing Potion (-5), 33448 Runic Mana Potion (-5),
-# 36906 Frost Lotus (-10), 35625 Eternal Life (-20). Ids without a live
-# item_template row are ignored at the menu.
-ItemInfusion.Substances = "33447:5,33448:5,36906:10,35625:20"
+# consumables handed over per attempt. Defaults span all level bands so
+# lowbies have affordable insurance from their own world:
+#   118 Minor Healing Potion (-5), 858 Lesser Healing Potion (-5),
+#   3928 Superior Healing Potion (-5), 33447 Runic Healing Potion (-5),
+#   33448 Runic Mana Potion (-5), 36906 Frost Lotus (-10),
+#   35625 Eternal Life (-20).
+# Ids without a live item_template row are ignored at the menu.
+ItemInfusion.Substances = "118:5,858:5,3928:5,33447:5,33448:5,36906:10,35625:20"

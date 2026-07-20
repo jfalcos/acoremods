@@ -50,7 +50,11 @@ being wasted.
 > replaces the hard cap. The split also moved the shared itemization math and
 > the parchment-gossip toolkit into mod-property-override
 > (PropertyOverrideItemization/Display), and item override rows gained a
-> `source` namespace mirroring player rows.
+> `source` namespace mirroring player rows. A follow-up mastery pass opened
+> the system to low levels (MinLevel 10): gear beyond the character's level
+> adds up to +30% risk (2%/level past a 10-level grace, worse of
+> target/donor, level 80 exempt), replacing the blanket level gate as the
+> twink-funnel protection.
 
 Combine multiple items into one with blended stats.
 

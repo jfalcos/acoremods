@@ -51,6 +51,12 @@ namespace mod_item_infusion
         // armor/resistances as the platform's 100-106 ids).
         static std::vector<DonorStat> CollectDonorStats(ItemTemplate const* proto);
 
+        // Mastery penalty for this player working on target (and donor, if
+        // given): the worse RequiredLevel overshoot decides. 0 when the
+        // player is at/above Mastery.MasteredAtLevel (and that knob is > 0).
+        float MasteryPenaltyFor(Player* player, ItemTemplate const* target,
+                                ItemTemplate const* donor = nullptr) const;
+
         // GM: force the roll's risk (0-100), -1 = live math. For the
         // in-game verification runbook.
         void SetRiskOverride(int32 percent) { _riskOverridePct = percent; }
@@ -61,8 +67,9 @@ namespace mod_item_infusion
 
         bool _enabled = true;
         bool _debug = false;
-        uint32 _minLevel = 30;
+        uint32 _minLevel = 10;
         uint32 _alchemistEntry = 96010;
+        uint32 _masteredAtLevel = 80; // 0 = the exemption never applies
         InfusionConfig _cfg;
         std::vector<std::pair<uint32, float>> _substances;
         int32 _riskOverridePct = -1;

@@ -42,6 +42,17 @@ Mitigation is chosen per attempt and consumed **win or lose**:
   Frost Lotus −10%, Eternal Life −20%),
 - floored at 2% — no attempt is ever fully safe.
 
+**Mastery** makes the system fun at every level, not just endgame: gear
+beyond the character's level is riskier to infuse ("you don't know how to
+mix what you can't yet wield"). An item is mastered once
+`charLevel >= RequiredLevel + 10`; below that each missing level adds +2%
+risk, capped at +30%, taking the *worse* of target and donor — so a
+level-25 feeding their own level-20 quest gear pays nothing extra, while a
+twink fed a level-40 BoE donor pays the full +30%. Characters at level 80
+count as fully mastered (configurable), leaving the endgame math exactly
+as tuned. The surcharge is always shown explicitly ("Beyond your mastery:
++N% risk") in the gossip and chat.
+
 Transfers are deterministic (per-stat `ceil(native × efficiency)`, duplicate
 template slots merged before scaling); the dice only decide survival.
 
@@ -61,8 +72,11 @@ template slots merged before scaling); the dice only decide survival.
 
 All knobs of the model above: `ItemInfusion.EfficiencyPercent`,
 `Risk.{Base,Slope,Pivot,Max,Floor}Percent`, `Risk.Exponent`,
-`CoinReductionPercent`, `Substances` (`"itemId:pct,..."`), `MinLevel`,
-`AlchemistEntry`, `Enable`, `Debug`.
+`CoinReductionPercent`, `Substances` (`"itemId:pct,..."` — defaults span
+all level bands, Minor Healing Potion through Eternal Life),
+`Mastery.{GraceLevels,PenaltyPerLevelPercent,MaxPenaltyPercent,
+MasteredAtLevel}`, `MinLevel` (default 10 — the mastery term, not this
+gate, is the low-level protection), `AlchemistEntry`, `Enable`, `Debug`.
 
 ## Design notes
 

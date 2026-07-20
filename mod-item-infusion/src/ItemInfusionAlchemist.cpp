@@ -125,7 +125,8 @@ namespace
         return out;
     }
 
-    // Live risk for the player's current pending selection.
+    // Live risk for the player's current pending selection (donor's
+    // mastery overshoot included when one is chosen).
     float PendingRisk(Player* player, Pending const& st, Item* target)
     {
         auto& mgr = ItemInfusionMgr::Instance();
@@ -133,11 +134,14 @@ namespace
         ItemTemplate const* proto = target->GetTemplate();
         float f = MixFraction(props.GetActiveOverrides(player, target->GetGUID().GetCounter()),
                               proto->Quality, proto->ItemLevel);
+        Item* donor = player->GetItemByGuid(st.donorGuid);
+        float penalty = mgr.MasteryPenaltyFor(player, proto,
+                                              donor ? donor->GetTemplate() : nullptr);
         std::vector<float> reductions;
         for (UsableSubstance const& s : UsableSubstances(player))
             if (st.substanceMask & (1u << s.index))
                 reductions.push_back(s.reduction);
-        return MitigatedRisk(mgr.Cfg(), RiskFor(mgr.Cfg(), f), st.coins, reductions);
+        return MitigatedRisk(mgr.Cfg(), RiskFor(mgr.Cfg(), f, penalty), st.coins, reductions);
     }
 
     void SendTargetMenu(Player* player, Creature* creature)
@@ -161,9 +165,10 @@ namespace
             {
                 auto rows = props.GetActiveOverrides(player, item->GetGUID().GetCounter());
                 float f = MixFraction(rows, proto->Quality, proto->ItemLevel);
+                float penalty = mgr.MasteryPenaltyFor(player, proto);
                 label = fmt::format("{}{}{}  risk {}{:.0f}%{}",
                                     QualityColor(proto->Quality), proto->Name1, COL_END,
-                                    COL_COST, RiskFor(mgr.Cfg(), f) * 100.f, COL_END);
+                                    COL_COST, RiskFor(mgr.Cfg(), f, penalty) * 100.f, COL_END);
             }
             AddGossipItemFor(player, GOSSIP_ICON_MONEY_BAG, label, SENDER_TARGETS, slot);
         }
@@ -272,6 +277,13 @@ namespace
                                                            current)),
                              SENDER_CONFIRM, ACTION_REFRESH);
         }
+
+        // Mastery surcharge is shown explicitly, never silently folded in.
+        if (float penalty = mgr.MasteryPenaltyFor(player, tproto, dproto); penalty > 0.f)
+            AddGossipItemFor(player, GOSSIP_ICON_CHAT,
+                             fmt::format("Beyond your mastery: +{}{:.0f}%{} risk",
+                                         COL_COST, penalty * 100.f, COL_END),
+                             SENDER_CONFIRM, ACTION_REFRESH);
 
         // Mitigation. Coins first, then owned substances.
         uint32 coinsOwned = player->GetItemCount(mgr.CoinItemId(), false);

@@ -100,6 +100,34 @@ TEST(Infusions, RiskCurveShape)
     EXPECT_TRUE(RiskFor(cfg, -1.f) > 0.049f);
 }
 
+TEST(Infusions, MasteryPenaltyShape)
+{
+    InfusionConfig cfg = Cfg(); // grace 10, 2%/level, cap 30%
+    // At or past RequiredLevel + grace: mastered, no penalty.
+    EXPECT_EQ(MasteryPenalty(cfg, 30, 20), 0.f);
+    EXPECT_EQ(MasteryPenalty(cfg, 80, 70), 0.f);
+    // Linear in missing levels: L25 vs req-20 item -> 5 short -> 10%.
+    float p = MasteryPenalty(cfg, 25, 20);
+    EXPECT_TRUE(p > 0.099f && p < 0.101f);
+    // Capped: L25 vs req-40 item -> 25 short -> 50% uncapped -> 30%.
+    float pc = MasteryPenalty(cfg, 25, 40);
+    EXPECT_TRUE(pc > 0.299f && pc < 0.301f);
+    // No-requirement gear (req 0) is mastered from level >= grace.
+    EXPECT_EQ(MasteryPenalty(cfg, 10, 0), 0.f);
+}
+
+TEST(Infusions, RiskIncludesMasteryPenaltyAndStillClamps)
+{
+    InfusionConfig cfg = Cfg();
+    // Zero penalty == the historical two-arg behavior.
+    EXPECT_EQ(RiskFor(cfg, 0.15f, 0.f), RiskFor(cfg, 0.15f));
+    // Penalty stacks additively before the clamp: fresh item + 30% -> 35%.
+    float r = RiskFor(cfg, 0.f, 0.30f);
+    EXPECT_TRUE(r > 0.349f && r < 0.351f);
+    // riskMax still wins over fill + penalty.
+    EXPECT_TRUE(RiskFor(cfg, 10.f, 0.30f) < 0.901f);
+}
+
 TEST(Infusions, MitigationStacksAndFloors)
 {
     InfusionConfig cfg = Cfg();

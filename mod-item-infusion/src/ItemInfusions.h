@@ -35,6 +35,14 @@ struct InfusionConfig
     float riskMax       = 0.90f; // hard ceiling
     float riskFloor     = 0.02f; // mitigation can never push risk below this
     float coinReduction = 0.05f; // risk removed per Paragon Coin pledged
+    // Mastery: gear beyond the character's level is riskier to infuse
+    // ("you don't know how to mix what you can't yet wield"). An item is
+    // mastered once charLevel >= RequiredLevel + grace; below that each
+    // missing level adds penaltyPerLevel of risk, capped. The max-level
+    // exemption is engine policy, applied by callers.
+    uint32 masteryGrace          = 10;
+    float masteryPenaltyPerLevel = 0.02f;
+    float masteryPenaltyMax      = 0.30f;
 };
 
 // One donor stat as read off the ItemTemplate by the engine-side adapter.
@@ -66,9 +74,16 @@ float YieldPoints(std::vector<YieldEntry> const& yield);
 // refuse such targets before ever rolling).
 float MixFraction(std::vector<OverrideRow> const& rows, uint32 quality, uint32 itemLevel);
 
-// Destruction chance BEFORE mitigation for a target at mix fraction `f`:
-// clamp(riskBase + riskSlope * (f / riskPivot)^riskExp, riskBase, riskMax).
-float RiskFor(InfusionConfig const& cfg, float f);
+// Extra risk from infusing gear beyond the character's mastery:
+// min(masteryPenaltyMax, masteryPenaltyPerLevel *
+//     max(0, (requiredLevel + masteryGrace) - charLevel)).
+float MasteryPenalty(InfusionConfig const& cfg, uint32 charLevel, uint32 requiredLevel);
+
+// Destruction chance BEFORE mitigation for a target at mix fraction `f`,
+// plus any mastery penalty:
+// clamp(riskBase + riskSlope * (f / riskPivot)^riskExp + penalty,
+//       riskBase, riskMax).
+float RiskFor(InfusionConfig const& cfg, float f, float masteryPenalty = 0.f);
 
 // Risk after pledging `coins` and the given substance reductions,
 // clamped to [riskFloor, riskMax].
