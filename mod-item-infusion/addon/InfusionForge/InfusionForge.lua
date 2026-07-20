@@ -81,15 +81,19 @@ end)
 -- Window --------------------------------------------------------------------
 
 local frame = CreateFrame("Frame", "InfusionForgeFrame", UIParent)
-frame:SetWidth(360)
+frame:SetWidth(400)
 frame:SetHeight(430)
 frame:SetPoint("CENTER")
+frame:SetFrameStrata("DIALOG")
+-- Opaque rock background (the dialog-box background is translucent and
+-- lets the world bleed through).
 frame:SetBackdrop({
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    bgFile = "Interface\\FrameGeneral\\UI-Background-Rock",
     edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-    tile = true, tileSize = 32, edgeSize = 32,
+    tile = true, tileSize = 256, edgeSize = 32,
     insets = { left = 11, right = 12, top = 12, bottom = 11 },
 })
+frame:SetBackdropColor(1, 1, 1, 1)
 frame:SetMovable(true)
 frame:EnableMouse(true)
 frame:RegisterForDrag("LeftButton")
@@ -123,13 +127,13 @@ local function MakeWell(name, x)
     return well
 end
 
-local targetWell = MakeWell("InfusionForgeTargetWell", 70)
-local donorWell = MakeWell("InfusionForgeDonorWell", 250)
+local targetWell = MakeWell("InfusionForgeTargetWell", 80)
+local donorWell = MakeWell("InfusionForgeDonorWell", 280)
 WellLabel(frame, targetWell, "Target (equipped)")
 WellLabel(frame, donorWell, "Sacrifice")
 
 local arrow = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-arrow:SetPoint("TOPLEFT", 155, -68)
+arrow:SetPoint("TOPLEFT", 180, -68)
 arrow:SetText("<<<")
 
 local function RequestPreview()
@@ -244,6 +248,8 @@ riskLabel:SetPoint("BOTTOMLEFT", riskBar, "TOPLEFT", 0, 4)
 riskLabel:SetText("Destruction risk")
 local masteryText = frame:CreateFontString(nil, "OVERLAY", "GameFontRedSmall")
 masteryText:SetPoint("TOPLEFT", riskBar, "BOTTOMLEFT", 0, -2)
+masteryText:SetWidth(180)
+masteryText:SetJustifyH("LEFT")
 masteryText:SetText("")
 
 local function PaintRisk(pct, penaltyPct)
@@ -346,9 +352,11 @@ local function Args()
 end
 
 local lastRisk = 0
+local yieldCount = 0
 
+-- StaticPopup text supports at most TWO %s substitutions.
 StaticPopupDialogs["INFUSIONFORGE_CONFIRM"] = {
-    text = "Infuse %s with %s?\n\nDestruction risk: %s - failure DESTROYS the target!",
+    text = "Sacrifice %s?\n\nDestruction risk: %s - failure DESTROYS the target item!",
     button1 = YES,
     button2 = NO,
     OnAccept = function()
@@ -370,8 +378,7 @@ infuseBtn:Disable()
 infuseBtn:SetScript("OnClick", function()
     if target and donor then
         StaticPopup_Show("INFUSIONFORGE_CONFIRM",
-                         targetWell.link or "?", donorWell.link or "?",
-                         lastRisk .. "%")
+                         donorWell.link or "?", lastRisk .. "%")
     end
 end)
 
@@ -381,6 +388,7 @@ local function ClearPreview(text)
     for _, row in ipairs(yieldRows) do
         row:SetText("")
     end
+    yieldCount = 0
     substances = {}
     PaintSubstances()
     PaintRisk(0, 0)
@@ -440,21 +448,20 @@ events:SetScript("OnEvent", function(_, event, prefix, message, _, sender)
         for _, row in ipairs(yieldRows) do
             row:SetText("")
         end
+        yieldCount = 0
         substances = {}
         infuseBtn:Enable()
         status:SetText("")
     elseif kind == "R" and a == "Y" then
-        local i = 1
-        while yieldRows[i] and yieldRows[i]:GetText() ~= "" do
-            i = i + 1
-        end
+        -- Y may span several messages; append after the rows already
+        -- filled (counted explicitly: GetText() is nil when empty).
         for entry in string.gmatch(rest or "", "[^;]+") do
             local prop, amount = string.match(entry, "^(%d+):(-?%d+)$")
-            if prop and yieldRows[i] then
+            if prop and yieldRows[yieldCount + 1] then
+                yieldCount = yieldCount + 1
                 local name = PROPERTY_NAMES[tonumber(prop)] or ("Property " .. prop)
-                yieldRows[i]:SetText("+" .. amount .. " " .. name)
-                yieldRows[i]:SetTextColor(0.2, 1.0, 0.2)
-                i = i + 1
+                yieldRows[yieldCount]:SetText("+" .. amount .. " " .. name)
+                yieldRows[yieldCount]:SetTextColor(0.2, 1.0, 0.2)
             end
         end
     elseif kind == "R" and a == "S" then
