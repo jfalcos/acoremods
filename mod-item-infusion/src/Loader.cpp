@@ -4,6 +4,7 @@
 #include "ScriptMgr.h"
 
 void AddItemInfusionAlchemistScripts();
+void AddItemInfusionAddonScripts();
 void AddItemInfusionCommandScripts();
 
 namespace
@@ -27,5 +28,6 @@ void Addmod_item_infusionScripts()
     LOG_INFO("module", "mod-item-infusion: registering scripts.");
     new ItemInfusion_WorldScript();
     AddItemInfusionAlchemistScripts();
+    AddItemInfusionAddonScripts();
     AddItemInfusionCommandScripts();
 }

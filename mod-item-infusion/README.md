@@ -63,6 +63,15 @@ template slots merged before scaling); the dice only decide survival.
 
 ## In game
 
+- **Infusion Window** (`addon/InfusionForge/`, hand-copied into each
+  player's `Interface/AddOns/` like PropertyOverlay): drag your equipped
+  target and a bag sacrifice into the two wells, watch the transferred
+  stats and the server-computed risk bar update live, pledge coins /
+  check substances (ineligible ones show disabled), confirm through a
+  native popup. Open with `/infusion` or the Alchemist's "Open the
+  Infusion Window" gossip row. Wire protocol `IFUSE` mirrors
+  PropertyOverlay's IPROP (whisper-to-self, 255-byte chunked replies,
+  fully server-authoritative — the addon never computes anything).
 - **Arcane Alchemist** (creature 96010, spawn once with `.npc add 96010`):
   pick an equipped target → pick a bag donor (only items with mappable
   stats are offered) → confirm screen with WoW-style `Total (base+bonus)`

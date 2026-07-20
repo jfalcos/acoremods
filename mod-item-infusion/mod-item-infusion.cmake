@@ -6,7 +6,8 @@
 
 get_property(_ACORE_MODULE_TEST_SOURCES GLOBAL PROPERTY ACORE_MODULE_TEST_SOURCES)
 list(APPEND _ACORE_MODULE_TEST_SOURCES
-    "${CMAKE_CURRENT_LIST_DIR}/tests/ItemInfusionsTests.cpp")
+    "${CMAKE_CURRENT_LIST_DIR}/tests/ItemInfusionsTests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/tests/ItemInfusionAddonMsgTests.cpp")
 set_property(GLOBAL PROPERTY ACORE_MODULE_TEST_SOURCES
     "${_ACORE_MODULE_TEST_SOURCES}")
 

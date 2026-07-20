@@ -1,0 +1,7 @@
+## Interface: 30300
+## Title: InfusionForge
+## Notes: Item infusion window for the mod-item-infusion server module.
+## Author: acoremods
+## Version: 1.0
+
+InfusionForge.lua

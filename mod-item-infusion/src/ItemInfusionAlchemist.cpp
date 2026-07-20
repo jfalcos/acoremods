@@ -1,3 +1,4 @@
+#include "ItemInfusionAddonMsg.h"
 #include "ItemInfusionMgr.h"
 #include "PropertyOverrideDisplay.h"
 #include "PropertyOverrideMgr.h"
@@ -47,6 +48,7 @@ namespace
     enum Actions
     {
         ACTION_CLOSE        = GOSSIP_ACTION_INFO_DEF + 1,
+        ACTION_OPEN_ADDON   = GOSSIP_ACTION_INFO_DEF + 10,
         ACTION_BACK_TARGETS = GOSSIP_ACTION_INFO_DEF + 2,
         ACTION_BACK_DONORS  = GOSSIP_ACTION_INFO_DEF + 3,
         ACTION_PAGE_PREV    = GOSSIP_ACTION_INFO_DEF + 4,
@@ -163,6 +165,11 @@ namespace
         auto& props = mod_property_override::PropertyOverrideMgr::Instance();
         ClearGossipMenuFor(player);
 
+        // Bridge to the InfusionForge addon window (no-op without it: the
+        // client drops addon messages with unknown prefixes).
+        AddGossipItemFor(player, GOSSIP_ICON_TRAINER,
+                         "Open the Infusion Window (addon)",
+                         SENDER_TARGETS, ACTION_OPEN_ADDON);
         for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
         {
             Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
@@ -371,6 +378,12 @@ namespace
                     st = Pending{};
                     st.targetSlot = static_cast<uint8>(action);
                     SendDonorMenu(player, creature);
+                }
+                else if (action == ACTION_OPEN_ADDON)
+                {
+                    mod_property_override::PropertyOverrideMgr::Instance()
+                        .SendAddonMessage(player, mod_item_infusion::addon::BuildOpen());
+                    CloseGossipMenuFor(player);
                 }
                 else
                     CloseGossipMenuFor(player);
