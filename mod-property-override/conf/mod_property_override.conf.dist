@@ -1,0 +1,26 @@
+[worldserver]
+
+###################################################################################################
+#    Property Override System — mod-property-override
+#
+#    Per-item-instance stat overrides: extra flat stats bound to a specific item instance
+#    (item_instance.guid), applied while the item is equipped. Prototype slice of the
+#    shared foundation for AA / item mixing / item upgrades (see acoremods PROPOSALS.md).
+#
+#    GM commands: .propover add <slot> <property> <value> [durationSecs]
+#                 .propover clear <slot>
+#                 .propover list <slot>
+###################################################################################################
+
+#    PropertyOverride.Enable
+#        Description: Master on/off switch. When off, no overrides are loaded or applied
+#                     and addon queries are ignored.
+#        Default:     1
+
+PropertyOverride.Enable = 1
+
+#    PropertyOverride.Debug
+#        Description: Verbose module logging (apply/unapply/sync decisions).
+#        Default:     0
+
+PropertyOverride.Debug = 0

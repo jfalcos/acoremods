@@ -145,6 +145,12 @@ feeds the AA pipeline.
 
 # Shared foundation for 2/3/4: Property Override System
 
+**Status (2026-07-19): prototype implemented and verified in-game** as
+`mod-property-override` — full lifecycle pass (equip/unequip/swap/relog/
+`.reset stats`/expiry/destroy) with no drift, addon tooltip round-trip
+working, property set extended to the full flat+ratings tier on `ITEM_MOD_*`
+ids. See the module README. Percent/proc properties remain future work.
+
 Design landed in a 2026-07-19 follow-up conversation. Proposals 2 (AA), 3 (item
 mixing), and 4 (item upgrades) all reduce to one system: **override N properties
 of a target (character or item instance), with exact values, for any duration,

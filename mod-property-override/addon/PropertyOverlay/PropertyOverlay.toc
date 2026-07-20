@@ -1,0 +1,7 @@
+## Interface: 30300
+## Title: PropertyOverlay
+## Notes: Shows item property overrides from mod-property-override in tooltips.
+## Author: WoWDev
+## Version: 0.1
+
+PropertyOverlay.lua
