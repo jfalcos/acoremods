@@ -1,0 +1,102 @@
+[worldserver]
+
+###################################################################################################
+#    Paragon — mod-paragon
+#
+#    Alternate Advancement: players divert a chosen percentage of ALL XP they earn into an
+#    account-wide Paragon XP (PX) pool. Every Paragon.PXPerLevel PX = one paragon level,
+#    which mails a Paragon Coin (+ milestone cosmetics at catalog levels). Coins buy ranked
+#    stat perks (applied via mod-property-override, source 'paragon') and rotating cosmetics
+#    at the Paragon Quartermaster (creature 96000; spawn where you like with .npc add).
+#
+#    Depends on mod-property-override.
+###################################################################################################
+
+#    Paragon.Enable
+#        Description: Master on/off switch.
+#        Default:     1
+
+Paragon.Enable = 1
+
+#    Paragon.PXPerLevel
+#        Description: PX required per paragon level (= one coin).
+#        Default:     1000000
+
+Paragon.PXPerLevel = 1000000
+
+#    Paragon.CoinItemId
+#        Description: Item entry used as the Paragon Coin. Default is the commandeered
+#                     native entry 37711 (a Blizzard dev currency-tab token — see
+#                     the module's world migration), so coins render in the client's
+#                     CURRENCY TAB with a real icon, no client patch needed.
+#        Default:     37711
+
+Paragon.CoinItemId = 37711
+
+#    Paragon.QuartermasterEntry
+#        Description: Creature entry of the Paragon Quartermaster (mail sender + vendor).
+#        Default:     96000
+
+Paragon.QuartermasterEntry = 96000
+
+#    Paragon.MinToggleLevel
+#        Description: Minimum character level before XP diversion applies.
+#        Default:     30
+
+Paragon.MinToggleLevel = 30
+
+#
+#    XP allocation caps: players choose their divert percentage with .paragon setxp,
+#    clamped to Low below BreakLevel and High at/above it.
+#
+
+Paragon.MaxXPPercent.Low = 30
+Paragon.MaxXPPercent.High = 100
+Paragon.MaxXPPercent.BreakLevel = 60
+
+#    Paragon.XPGainScale
+#        Description: Scale diverted PX by (level / 80) so low-level XP feeds the pool
+#                     more slowly.
+#        Default:     0
+
+Paragon.XPGainScale = 0
+
+#    Paragon.BlockedMaps
+#        Description: Comma-separated map ids where PX gain is disabled
+#                     (battlegrounds/arenas are always excluded).
+#        Default:     "489,566"
+
+Paragon.BlockedMaps = "489,566"
+
+#    Paragon.Broadcast.Milestones
+#        Description: Paragon levels that trigger a realm-wide announcement.
+#        Default:     "10,25,50"
+
+Paragon.Broadcast.Milestones = "10,25,50"
+
+#    Paragon.LoginSplash
+#        Description: Show PL/progress at login for accounts that use the system.
+#        Default:     1
+
+Paragon.LoginSplash = 1
+
+#
+#    Perks — ranked flat-stat purchases, per character. Cost of the next rank in coins:
+#        cost = 1 + floor(currentRanks / CostStepEvery)
+#
+
+Paragon.Perk.MaxRanks = 20
+Paragon.Perk.CostStepEvery = 5
+Paragon.Perk.ValuePerRank.Strength = 5
+Paragon.Perk.ValuePerRank.Agility = 5
+Paragon.Perk.ValuePerRank.Stamina = 5
+Paragon.Perk.ValuePerRank.Intellect = 5
+Paragon.Perk.ValuePerRank.Spirit = 5
+Paragon.Perk.ValuePerRank.AttackPower = 10
+Paragon.Perk.ValuePerRank.SpellPower = 6
+
+#    Paragon.Debug
+#        Description: Verbose module logging.
+#        Default:     0
+
+Paragon.Debug = 0

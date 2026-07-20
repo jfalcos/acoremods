@@ -21,6 +21,12 @@ Pokémon-style turn-based battles for character pets.
 
 ## 2. Post-80 Alternate Advancement (AA)
 
+> **Status (2026-07-19): shipped as the revived `mod-paragon`** — configurable
+> XP divert at any level (account-wide PX pool), paragon levels mailing
+> Paragon Coins (commandeered native currency-tab item 37711), and ranked
+> stat perks on the Property Override System (source 'paragon'). Verified
+> in-game. See the module README for the design decisions.
+
 EverQuest-style AA: XP earned past level 80 converts to spendable points instead of
 being wasted.
 
