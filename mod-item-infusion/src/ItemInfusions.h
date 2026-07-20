@@ -95,8 +95,9 @@ float RiskFor(InfusionConfig const& cfg, float f, float masteryPenalty = 0.f);
 bool SubstanceEffective(InfusionConfig const& cfg, uint32 substanceItemLevel,
                         uint32 gearRequiredLevel);
 
-// Risk after pledging `coins` and the given substance reductions,
-// clamped to [riskFloor, riskMax].
+// Risk after mitigation, clamped to [riskFloor, riskMax]. Substances apply
+// multiplicatively (each removes its fraction OF the current risk), then
+// coins subtract flat (coinReduction each).
 float MitigatedRisk(InfusionConfig const& cfg, float risk, uint32 coins,
                     std::vector<float> const& substanceReductions);
 

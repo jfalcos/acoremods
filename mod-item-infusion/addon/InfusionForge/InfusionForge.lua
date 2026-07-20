@@ -85,15 +85,17 @@ frame:SetWidth(400)
 frame:SetHeight(430)
 frame:SetPoint("CENTER")
 frame:SetFrameStrata("DIALOG")
--- Opaque rock background (the dialog-box background is translucent and
--- lets the world bleed through).
+-- Border via backdrop; the fill is a SOLID color texture (texture-file
+-- backgrounds proved unreliable: the dialog one is translucent and the
+-- 3.3.5 client lacks the later opaque ones).
 frame:SetBackdrop({
-    bgFile = "Interface\\FrameGeneral\\UI-Background-Rock",
     edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-    tile = true, tileSize = 256, edgeSize = 32,
-    insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    edgeSize = 32,
 })
-frame:SetBackdropColor(1, 1, 1, 1)
+local bg = frame:CreateTexture(nil, "BACKGROUND")
+bg:SetPoint("TOPLEFT", 9, -9)
+bg:SetPoint("BOTTOMRIGHT", -9, 9)
+bg:SetTexture(0.09, 0.08, 0.06, 1) -- opaque near-black parchment tone
 frame:SetMovable(true)
 frame:EnableMouse(true)
 frame:RegisterForDrag("LeftButton")

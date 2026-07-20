@@ -86,7 +86,7 @@ void ItemInfusionMgr::LoadConfig()
         sConfigMgr->GetOption<uint32>("ItemInfusion.CoinReductionPercent", 5) / 100.0f;
     _substances = ParseSubstances(sConfigMgr->GetOption<std::string>(
         "ItemInfusion.Substances",
-        "118:5,858:5,3928:5,33447:5,33448:5,36906:10,35625:20"));
+        "118:5,858:5,3928:5,33447:5,33448:5,36906:8,35625:10"));
 
     LOG_INFO("module",
              "mod-item-infusion: enable={} minLevel={} alchemist={} eff={:.2f} "

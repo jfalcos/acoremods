@@ -75,11 +75,17 @@ ItemInfusion.CoinReductionPercent = 5
 ItemInfusion.SubstanceGraceLevels = 15
 
 # Stabilizing substances: "itemId:riskReductionPercent,..." — native
-# consumables handed over per attempt. Defaults span all level bands so
-# lowbies have affordable insurance from their own world:
+# consumables handed over per attempt. Reductions are MULTIPLICATIVE:
+# each removes its percent OF THE CURRENT RISK (Eternal Life at 10 turns
+# a 50% roll into 45%, a 90% roll into 81%), so farmable endgame reagents
+# soften gambles without ever trivializing deep ones. ONE of each substance
+# per attempt (checkbox, consumed win or lose) - quantities cannot stack.
+# Coins subtract flat afterwards. Defaults span all level bands so lowbies
+# have affordable insurance from their own world; endgame reagents are
+# priced as the commodities they are at 80:
 #   118 Minor Healing Potion (-5), 858 Lesser Healing Potion (-5),
 #   3928 Superior Healing Potion (-5), 33447 Runic Healing Potion (-5),
-#   33448 Runic Mana Potion (-5), 36906 Frost Lotus (-10),
-#   35625 Eternal Life (-20).
+#   33448 Runic Mana Potion (-5), 36906 Frost Lotus (-8),
+#   35625 Eternal Life (-10).
 # Ids without a live item_template row are ignored at the menu.
-ItemInfusion.Substances = "118:5,858:5,3928:5,33447:5,33448:5,36906:10,35625:20"
+ItemInfusion.Substances = "118:5,858:5,3928:5,33447:5,33448:5,36906:8,35625:10"

@@ -83,9 +83,15 @@ bool SubstanceEffective(InfusionConfig const& cfg, uint32 substanceItemLevel,
 float MitigatedRisk(InfusionConfig const& cfg, float risk, uint32 coins,
                     std::vector<float> const& substanceReductions)
 {
-    float reduced = risk - static_cast<float>(coins) * cfg.coinReduction;
+    // Substances are MULTIPLICATIVE (each removes its fraction of the
+    // current risk): commodity reagents help least exactly when the stakes
+    // are highest, so farmable endgame consumables can never trivialize a
+    // deep gamble. Coins subtract flat afterwards - they are the finite,
+    // account-pooled resource and keep their full weight.
+    float reduced = risk;
     for (float r : substanceReductions)
-        reduced -= r;
+        reduced *= (1.f - r);
+    reduced -= static_cast<float>(coins) * cfg.coinReduction;
     return std::clamp(reduced, cfg.riskFloor, cfg.riskMax);
 }
 

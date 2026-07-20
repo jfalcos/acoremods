@@ -145,12 +145,17 @@ TEST(Infusions, SubstanceTierBanding)
 TEST(Infusions, MitigationStacksAndFloors)
 {
     InfusionConfig cfg = Cfg();
-    // 50% risk, 4 coins at -5% each -> 30%.
+    // Coins subtract flat: 50% risk, 4 coins at -5% each -> 30%.
     float r = MitigatedRisk(cfg, 0.50f, 4, {});
     EXPECT_TRUE(r > 0.299f && r < 0.301f);
-    // Substances stack with coins, order-independent by construction.
+    // Substances are multiplicative (fractions of current risk), then
+    // coins: 50% * 0.9 * 0.8 = 36%, minus 2 coins -> 26%.
     float r2 = MitigatedRisk(cfg, 0.50f, 2, { 0.10f, 0.20f });
-    EXPECT_TRUE(r2 > 0.099f && r2 < 0.101f);
+    EXPECT_TRUE(r2 > 0.259f && r2 < 0.261f);
+    // Multiplicative means cheap reagents shave LESS off deep gambles:
+    // one -20% substance turns 90% into 72%, not 70%.
+    float rDeep = MitigatedRisk(cfg, 0.90f, 0, { 0.20f });
+    EXPECT_TRUE(rDeep > 0.719f && rDeep < 0.721f);
     // Overkill mitigation floors at riskFloor, never zero.
     float r3 = MitigatedRisk(cfg, 0.10f, 50, { 0.20f, 0.20f });
     EXPECT_TRUE(r3 > 0.019f && r3 < 0.021f);
