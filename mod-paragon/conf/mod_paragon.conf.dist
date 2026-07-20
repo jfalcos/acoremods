@@ -19,10 +19,14 @@
 Paragon.Enable = 1
 
 #    Paragon.PXPerLevel
-#        Description: PX required per paragon level (= one coin).
-#        Default:     1000000
+#        Description: PX required per paragon level (= one coin). The default is
+#                     anchored to the native 79->80 XP bar (player_xp_for_level:
+#                     1,670,800) so paragon levels continue Blizzard's own curve,
+#                     which plateaus at endgame (70->80 bars grow only ~10%).
+#                     One paragon level therefore paces like one late-game level.
+#        Default:     1670800
 
-Paragon.PXPerLevel = 1000000
+Paragon.PXPerLevel = 1670800
 
 #    Paragon.CoinItemId
 #        Description: Item entry used as the Paragon Coin. Default is the commandeered
@@ -87,6 +91,15 @@ Paragon.LoginSplash = 1
 
 Paragon.Perk.MaxRanks = 20
 Paragon.Perk.CostStepEvery = 5
+
+#    Paragon.Perk.MinLevel
+#        Description: Minimum character level to BUY perks (the spend gate,
+#                     mirroring MinToggleLevel on the earn side). Prevents
+#                     account-funded low-level alts from buying
+#                     bracket-breaking stats. Set 80 for strict post-cap AA.
+#        Default:     30
+
+Paragon.Perk.MinLevel = 30
 Paragon.Perk.ValuePerRank.Strength = 5
 Paragon.Perk.ValuePerRank.Agility = 5
 Paragon.Perk.ValuePerRank.Stamina = 5

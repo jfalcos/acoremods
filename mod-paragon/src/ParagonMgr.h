@@ -89,10 +89,11 @@ namespace mod_paragon
         bool _enabled = true;
         bool _loginSplash = true;
         bool _debug = false;
-        uint32 _pxPerLevel = 1000000;
+        uint32 _pxPerLevel = 1670800;
         uint32 _coinItemId = 37711;
         uint32 _qmNpcEntry = 96000;
         uint32 _minToggleLevel = 30;
+        uint32 _perkMinLevel = 30;
         uint32 _maxAllocLow = 30;
         uint32 _maxAllocHigh = 100;
         uint32 _allocCapBreakLevel = 60;

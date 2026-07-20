@@ -53,7 +53,7 @@ void ParagonMgr::LoadConfig()
 {
     _enabled = sConfigMgr->GetOption<bool>("Paragon.Enable",
                sConfigMgr->GetOption<bool>("Paragon.Enabled", true));
-    _pxPerLevel = sConfigMgr->GetOption<uint32>("Paragon.PXPerLevel", 1000000);
+    _pxPerLevel = sConfigMgr->GetOption<uint32>("Paragon.PXPerLevel", 1670800);
     _loginSplash = sConfigMgr->GetOption<bool>("Paragon.LoginSplash", true);
     _debug = sConfigMgr->GetOption<bool>("Paragon.Debug", false);
     _coinItemId = sConfigMgr->GetOption<uint32>("Paragon.CoinItemId", 37711);
@@ -71,6 +71,7 @@ void ParagonMgr::LoadConfig()
 
     _perkCfg.maxRanks = sConfigMgr->GetOption<uint32>("Paragon.Perk.MaxRanks", 20);
     _perkCfg.costStepEvery = sConfigMgr->GetOption<uint32>("Paragon.Perk.CostStepEvery", 5);
+    _perkMinLevel = sConfigMgr->GetOption<uint32>("Paragon.Perk.MinLevel", 30);
     static constexpr std::array<char const*, perks::PERK_SET.size()> VALUE_KEYS =
     {
         "Paragon.Perk.ValuePerRank.Strength",
@@ -319,6 +320,14 @@ bool ParagonMgr::TryPurchasePerk(Player* player, perks::Property prop)
     auto idx = perks::PerkIndex(prop);
     if (!idx)
         return false;
+
+    // Spend gate: keeps funded low-level alts from buying bracket-breaking
+    // stats (the earn side is gated by MinToggleLevel already).
+    if (player->GetLevel() < _perkMinLevel)
+    {
+        ch.PSendSysMessage("|cffffd100[Paragon]|r Perks unlock at level {}.", _perkMinLevel);
+        return false;
+    }
 
     ObjectGuid::LowType guidLow = player->GetGUID().GetCounter();
     uint32 ranks = GetPerkRanks(guidLow, prop);
