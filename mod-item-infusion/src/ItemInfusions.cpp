@@ -74,6 +74,12 @@ float RiskFor(InfusionConfig const& cfg, float f, float masteryPenalty)
     return std::clamp(risk, cfg.riskBase, cfg.riskMax);
 }
 
+bool SubstanceEffective(InfusionConfig const& cfg, uint32 substanceItemLevel,
+                        uint32 gearRequiredLevel)
+{
+    return gearRequiredLevel <= substanceItemLevel + cfg.substanceGrace;
+}
+
 float MitigatedRisk(InfusionConfig const& cfg, float risk, uint32 coins,
                     std::vector<float> const& substanceReductions)
 {

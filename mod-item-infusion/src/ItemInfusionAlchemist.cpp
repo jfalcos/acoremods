@@ -106,6 +106,7 @@ namespace
         float reduction;
         char const* name;
         uint32 owned;
+        uint32 itemLevel; // potency band: stabilizes gear up to this + grace
     };
 
     std::vector<UsableSubstance> UsableSubstances(Player* player)
@@ -120,9 +121,19 @@ namespace
             uint32 owned = player->GetItemCount(subs[i].first, false);
             if (!owned)
                 continue;
-            out.push_back({ i, subs[i].first, subs[i].second, tmpl->Name1.c_str(), owned });
+            out.push_back({ i, subs[i].first, subs[i].second, tmpl->Name1.c_str(),
+                            owned, tmpl->ItemLevel });
         }
         return out;
+    }
+
+    // Worse of target/donor decides which substances are potent enough.
+    uint32 GearReqLevel(Item* target, Item* donor)
+    {
+        uint32 req = target ? target->GetTemplate()->RequiredLevel : 0;
+        if (donor)
+            req = std::max(req, donor->GetTemplate()->RequiredLevel);
+        return req;
     }
 
     // Live risk for the player's current pending selection (donor's
@@ -137,9 +148,11 @@ namespace
         Item* donor = player->GetItemByGuid(st.donorGuid);
         float penalty = mgr.MasteryPenaltyFor(player, proto,
                                               donor ? donor->GetTemplate() : nullptr);
+        uint32 gearReq = GearReqLevel(target, donor);
         std::vector<float> reductions;
         for (UsableSubstance const& s : UsableSubstances(player))
-            if (st.substanceMask & (1u << s.index))
+            if ((st.substanceMask & (1u << s.index)) &&
+                SubstanceEffective(mgr.Cfg(), s.itemLevel, gearReq))
                 reductions.push_back(s.reduction);
         return MitigatedRisk(mgr.Cfg(), RiskFor(mgr.Cfg(), f, penalty), st.coins, reductions);
     }
@@ -300,8 +313,19 @@ namespace
         if (st.coins)
             AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Withdraw pledged coins",
                              SENDER_CONFIRM, ACTION_COIN_CLEAR);
+        uint32 gearReq = GearReqLevel(target, donor);
         for (UsableSubstance const& s : UsableSubstances(player))
         {
+            // Tier banding: too-weak reagents show grayed with the reason
+            // instead of silently vanishing (clicking harmlessly refreshes).
+            if (!SubstanceEffective(mgr.Cfg(), s.itemLevel, gearReq))
+            {
+                AddGossipItemFor(player, GOSSIP_ICON_VENDOR,
+                                 fmt::format("{}{} - too weak for this gear{}",
+                                             COL_GRAY, s.name, COL_END),
+                                 SENDER_CONFIRM, ACTION_REFRESH);
+                continue;
+            }
             bool on = st.substanceMask & (1u << s.index);
             AddGossipItemFor(player, GOSSIP_ICON_VENDOR,
                              fmt::format("{} {} ({} owned)",
@@ -411,9 +435,14 @@ namespace
                     Item* donor = player->GetItemByGuid(st.donorGuid);
                     if (target && donor)
                     {
+                        // Drop toggles that stopped being eligible (donor
+                        // change, gear change) rather than rejecting.
+                        uint32 gearReq = GearReqLevel(target, donor);
                         std::vector<uint32> subs;
                         for (UsableSubstance const& s : UsableSubstances(player))
-                            if (st.substanceMask & (1u << s.index))
+                            if ((st.substanceMask & (1u << s.index)) &&
+                                SubstanceEffective(ItemInfusionMgr::Instance().Cfg(),
+                                                   s.itemLevel, gearReq))
                                 subs.push_back(s.itemId);
                         ItemInfusionMgr::Instance().TryInfuse(player, target, donor,
                                                               st.coins, subs);

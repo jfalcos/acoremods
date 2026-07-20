@@ -38,9 +38,14 @@ risk = clamp(5% + 45% * (f / 30%)^1.6, 5%, 90%)
 Mitigation is chosen per attempt and consumed **win or lose**:
 
 - each pledged Paragon Coin: −5% risk,
-- each stabilizing substance (defaults: Runic Healing/Mana Potion −5%,
-  Frost Lotus −10%, Eternal Life −20%),
+- each stabilizing substance — **tier-banded like every native consumable**:
+  a reagent only stabilizes gear up to its own ItemLevel + 15, so Minor
+  Healing Potions insure starter gear while epics demand endgame reagents
+  (defaults span Minor/Lesser/Superior Healing Potion −5% through Runic
+  potions −5%, Frost Lotus −10%, Eternal Life −20%),
 - floored at 2% — no attempt is ever fully safe.
+- Coins are deliberately *not* banded: they're account-pooled endgame
+  currency, so spending them is a real price at any level.
 
 **Mastery** makes the system fun at every level, not just endgame: gear
 beyond the character's level is riskier to infuse ("you don't know how to

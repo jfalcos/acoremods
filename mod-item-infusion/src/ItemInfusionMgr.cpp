@@ -68,6 +68,7 @@ void ItemInfusionMgr::LoadConfig()
     _cfg.masteryPenaltyMax =
         sConfigMgr->GetOption<uint32>("ItemInfusion.Mastery.MaxPenaltyPercent", 30) / 100.0f;
     _masteredAtLevel = sConfigMgr->GetOption<uint32>("ItemInfusion.Mastery.MasteredAtLevel", 80);
+    _cfg.substanceGrace = sConfigMgr->GetOption<uint32>("ItemInfusion.SubstanceGraceLevels", 15);
     _cfg.efficiency =
         sConfigMgr->GetOption<uint32>("ItemInfusion.EfficiencyPercent", 35) / 100.0f;
     _cfg.riskBase =
@@ -186,6 +187,7 @@ ItemInfusionMgr::InfuseResult ItemInfusionMgr::TryInfuse(
                            coins);
         return InfuseResult::Rejected;
     }
+    uint32 gearReqLevel = std::max(tproto->RequiredLevel, dproto->RequiredLevel);
     std::vector<float> reductions;
     for (uint32 id : substanceIds)
     {
@@ -196,11 +198,17 @@ ItemInfusionMgr::InfuseResult ItemInfusionMgr::TryInfuse(
             ch.PSendSysMessage("|cffffd100[Infusion]|r Item {} is not a known substance.", id);
             return InfuseResult::Rejected;
         }
-        if (!player->GetItemCount(id, false))
+        ItemTemplate const* stmpl = sObjectMgr->GetItemTemplate(id);
+        if (!stmpl || !player->GetItemCount(id, false))
         {
             ch.PSendSysMessage("|cffffd100[Infusion]|r You have no {} left.",
-                               sObjectMgr->GetItemTemplate(id)
-                                   ? sObjectMgr->GetItemTemplate(id)->Name1 : "substance");
+                               stmpl ? stmpl->Name1 : "substance");
+            return InfuseResult::Rejected;
+        }
+        if (!SubstanceEffective(_cfg, stmpl->ItemLevel, gearReqLevel))
+        {
+            ch.PSendSysMessage("|cffffd100[Infusion]|r {} is too weak to stabilize "
+                               "this gear.", stmpl->Name1);
             return InfuseResult::Rejected;
         }
         reductions.push_back(it->second);

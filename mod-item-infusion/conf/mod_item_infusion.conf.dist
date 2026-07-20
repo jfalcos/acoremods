@@ -61,8 +61,18 @@ ItemInfusion.Risk.Exponent = 1.6
 ItemInfusion.Risk.MaxPercent = 90
 ItemInfusion.Risk.FloorPercent = 2
 
-# Risk removed per Paragon Coin pledged on the attempt.
+# Risk removed per Paragon Coin pledged on the attempt. Coins are NOT
+# tier-banded on purpose: they are account-pooled endgame currency, so a
+# low-level spending them pays a real price.
 ItemInfusion.CoinReductionPercent = 5
+
+# Substances are tier-banded like every native consumable: a reagent only
+# stabilizes gear whose (worse of target/donor) RequiredLevel is at most
+# the reagent's own ItemLevel + this grace. With 15: Minor Healing Potion
+# (ilvl 5) covers gear to req 20, Superior (ilvl 35) to req 50, Runic
+# potions (ilvl ~70+) cover everything - copper-priced potions can never
+# insure an epic.
+ItemInfusion.SubstanceGraceLevels = 15
 
 # Stabilizing substances: "itemId:riskReductionPercent,..." — native
 # consumables handed over per attempt. Defaults span all level bands so

@@ -128,6 +128,20 @@ TEST(Infusions, RiskIncludesMasteryPenaltyAndStillClamps)
     EXPECT_TRUE(RiskFor(cfg, 10.f, 0.30f) < 0.901f);
 }
 
+TEST(Infusions, SubstanceTierBanding)
+{
+    InfusionConfig cfg = Cfg(); // grace 15
+    // A Minor Healing Potion (ilvl 5) stabilizes gear up to req 20...
+    EXPECT_TRUE(SubstanceEffective(cfg, 5, 20));
+    // ...but not a req-21 blue, and certainly not a req-70 epic.
+    EXPECT_FALSE(SubstanceEffective(cfg, 5, 21));
+    EXPECT_FALSE(SubstanceEffective(cfg, 5, 70));
+    // Endgame reagents (ilvl ~70+) cover all native gear.
+    EXPECT_TRUE(SubstanceEffective(cfg, 70, 80));
+    // No-requirement gear accepts anything.
+    EXPECT_TRUE(SubstanceEffective(cfg, 5, 0));
+}
+
 TEST(Infusions, MitigationStacksAndFloors)
 {
     InfusionConfig cfg = Cfg();

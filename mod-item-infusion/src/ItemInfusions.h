@@ -43,6 +43,10 @@ struct InfusionConfig
     uint32 masteryGrace          = 10;
     float masteryPenaltyPerLevel = 0.02f;
     float masteryPenaltyMax      = 0.30f;
+    // Substances are tier-banded like every native consumable: a reagent
+    // can only stabilize gear up to its own ItemLevel + substanceGrace
+    // (a Minor Healing Potion does not steady an epic).
+    uint32 substanceGrace        = 15;
 };
 
 // One donor stat as read off the ItemTemplate by the engine-side adapter.
@@ -84,6 +88,12 @@ float MasteryPenalty(InfusionConfig const& cfg, uint32 charLevel, uint32 require
 // clamp(riskBase + riskSlope * (f / riskPivot)^riskExp + penalty,
 //       riskBase, riskMax).
 float RiskFor(InfusionConfig const& cfg, float f, float masteryPenalty = 0.f);
+
+// True when a substance of `substanceItemLevel` can stabilize gear whose
+// (worse of target/donor) RequiredLevel is `gearRequiredLevel`:
+// gearRequiredLevel <= substanceItemLevel + substanceGrace.
+bool SubstanceEffective(InfusionConfig const& cfg, uint32 substanceItemLevel,
+                        uint32 gearRequiredLevel);
 
 // Risk after pledging `coins` and the given substance reductions,
 // clamped to [riskFloor, riskMax].
