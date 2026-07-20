@@ -5,6 +5,12 @@ owns has its own level and XP, earned through activities that match the mount's 
 
 Full design lives in the core repo at `docs/MOUNT_PROGRESSION_SPEC.md`.
 
+**Depends on [`mod-property-override`](../mod-property-override/)** (C++ include +
+runtime): buff stats are written as permanent player-target override rows
+(source `'mount'`); the carrier aura is only the buff-tray icon. The bond is
+permanent and event-driven — replaced when another mount is activated, never
+expired on a timer (the spec §5 offline grace is superseded).
+
 ## Highlights
 
 - Independent level + XP per owned mount, capped at `MountProgression.MaxLevel` (default 60).

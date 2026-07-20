@@ -1,4 +1,6 @@
 #include "MountProgressionMgr.h"
+#include "PropertyOverrideMgr.h"
+
 #include "Chat.h"
 #include "Config.h"
 #include "Creature.h"
@@ -80,43 +82,47 @@ void MountProgressionMgr::LoadActiveMountFromDB(Player* player)
 
     uint32 guidLow = player->GetGUID().GetCounter();
     QueryResult result = CharacterDatabase.Query(
-        "SELECT spell_id, last_active_time FROM character_mount_active "
-        "WHERE guid = {}",
+        "SELECT spell_id FROM character_mount_active WHERE guid = {}",
         guidLow);
     if (!result)
+    {
+        ReconcileOrphanedMountRows(player);
         return;
+    }
 
     Field* f = result->Fetch();
     uint32 spellId = f[0].Get<uint32>();
-    uint64 lastActive = f[1].Get<uint64>();
 
     CatalogEntry const* entry = GetCatalogEntry(spellId);
     if (!entry)
     {
         CharacterDatabase.Execute(
             "DELETE FROM character_mount_active WHERE guid = {}", guidLow);
+        ReconcileOrphanedMountRows(player);
         return;
     }
 
-    uint64 now = static_cast<uint64>(::time(nullptr));
-    if (_offlineGraceSeconds > 0 &&
-        now - lastActive > _offlineGraceSeconds)
-    {
-        CharacterDatabase.Execute(
-            "DELETE FROM character_mount_active WHERE guid = {}", guidLow);
-        if (_debug)
-            LOG_INFO("module",
-                     "mod-mount-progression: guid {} offline {}s > grace {}s, "
-                     "carrier not reapplied",
-                     guidLow, static_cast<uint64>(now - lastActive),
-                     _offlineGraceSeconds);
-        return;
-    }
-
+    // The bond is permanent — no offline-grace expiry. Reapply is idempotent
+    // (same override key, same value) even though mod-property-override also
+    // reloaded the rows at login.
     SetActiveMount(player, spellId);
     MountProgress const* mp = GetProgress(player, spellId);
     uint16 level = mp ? mp->level : 1;
     ApplyMountBuff(player, entry, level);
+}
+
+// If no mount is bonded but 'mount' override rows exist (e.g. left behind by
+// the retired offline-grace deletion), clear them so stats never outlive the
+// bond they came from.
+void MountProgressionMgr::ReconcileOrphanedMountRows(Player* player)
+{
+    auto& props = mod_property_override::PropertyOverrideMgr::Instance();
+    for (auto const& row : props.GetPlayerOverrides(player))
+        if (row.source == "mount")
+        {
+            props.ClearPlayerOverrides(player, "mount");
+            return;
+        }
 }
 bool MountProgressionMgr::HasMadeStarterChoice(Player* player) const
 {

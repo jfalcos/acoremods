@@ -45,6 +45,10 @@ mgr.ClearPlayerOverrides(player, "mount");
 Rows persist in the characters DB, survive relogs, and are purged
 transactionally on character deletion (`OnPlayerDeleteFromDB`).
 
+Known consumers: `mod-mount-progression` (source `'mount'`, permanent rows for
+the active-mount bond). Modules that include this header require this module
+to be present in the build.
+
 ## GM commands (stand-in for the future purchase UI)
 
 ```

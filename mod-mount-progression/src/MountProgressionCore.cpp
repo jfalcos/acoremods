@@ -154,8 +154,6 @@ void MountProgressionMgr::LoadConfig()
         sConfigMgr->GetOption<uint32>("MountProgression.BuffCeiling.Epic", 200);
     _buffCeiling[static_cast<size_t>(MountRarity::Legendary)] =
         sConfigMgr->GetOption<uint32>("MountProgression.BuffCeiling.Legendary", 400);
-    _offlineGraceSeconds = sConfigMgr->GetOption<uint32>(
-        "MountProgression.OfflineGraceSeconds", 1800);
     _announceOnCast = sConfigMgr->GetOption<bool>(
         "MountProgression.AnnounceActiveOnCast", true);
     _carrierSpell[static_cast<size_t>(MountType::Stamina)] =
@@ -209,11 +207,11 @@ void MountProgressionMgr::LoadConfig()
              _debug);
     LOG_INFO("module",
              "mod-mount-progression: buff mode={} curve={} ceil=[{},{},{},{},{}] "
-             "grace={}s announce={} carriers=[{},{},{},{},{}] donors=[{},{},{},{},{}]",
+             "announce={} carriers=[{},{},{},{},{}] donors=[{},{},{},{},{}]",
              _buffMagnitudeMode, _buffLevelCurve,
              _buffCeiling[0], _buffCeiling[1], _buffCeiling[2],
              _buffCeiling[3], _buffCeiling[4],
-             _offlineGraceSeconds, _announceOnCast,
+             _announceOnCast,
              _carrierSpell[0], _carrierSpell[1], _carrierSpell[2],
              _carrierSpell[3], _carrierSpell[4],
              _iconDonor[0], _iconDonor[1], _iconDonor[2],

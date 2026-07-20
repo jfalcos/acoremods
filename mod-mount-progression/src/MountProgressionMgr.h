@@ -109,17 +109,22 @@ public:
     bool AwardActiveMountXP(Player* player, uint32 amount);
     bool SetActiveMountLevel(Player* player, uint16 level);
 
-    // Carrier-buff API (Slice 3). ApplyMountBuff removes any existing
-    // carrier aura first, then applies the one for `entry->type` with
-    // magnitude computed from ceiling × curve(level).
+    // Carrier-buff API (Slice 3, migrated onto the Property Override System).
+    // ApplyMountBuff replaces the 'mount' override rows with `entry->type`'s
+    // stat at magnitude ceiling × curve(level), then (re)casts the cosmetic
+    // carrier aura for the tray icon. Buffs are permanent and event-driven:
+    // replaced on mount switch, never expired on a timer.
     void ApplyMountBuff(Player* player, CatalogEntry const* entry,
                         uint16 level);
+    // Cosmetic-only carrier aura reapply (e.g. after ghost release); stats
+    // live in mod-property-override rows (source 'mount') and never drop.
+    void ApplyMountBuffAura(Player* player, CatalogEntry const* entry);
     void RemoveMountBuff(Player* player);
     uint32 ComputeBuffMagnitude(CatalogEntry const* entry,
                                 uint16 level) const;
 
-    // Cross-logout persistence of the active mount for the offline-grace
-    // reapply window (spec §5).
+    // Cross-logout persistence of the active mount (which mount is bonded;
+    // the stat rows persist independently in player_property_override).
     void SaveActiveMountToDB(Player* player);
     void LoadActiveMountFromDB(Player* player);
 
@@ -166,6 +171,13 @@ public:
 private:
     MountProgressionMgr() = default;
 
+    // Writes the 'mount' rows in mod-property-override (replace semantics,
+    // permanent). Alive-state independent.
+    void ApplyMountBuffStats(Player* player, CatalogEntry const* entry,
+                             uint16 level);
+    // Clears stray 'mount' rows for characters with no bonded mount.
+    void ReconcileOrphanedMountRows(Player* player);
+
     void AwardXP(Player* player, MountProgress* progress, uint32 amount,
                  CatalogEntry const* entry);
     uint32 KillXpForRank(Creature const* killed) const;
@@ -199,7 +211,6 @@ private:
     uint8 _buffLevelCurve = 1;     // 0=linear, 1=stepped, 2=quadratic
     uint32 _buffCeiling[static_cast<size_t>(MountRarity::MAX)] =
         {20, 60, 120, 200, 400};
-    uint32 _offlineGraceSeconds = 1800;
     bool _announceOnCast = true;
     uint32 _carrierSpell[static_cast<size_t>(MountType::MAX)] =
         {80000, 80001, 80002, 80003, 80004};

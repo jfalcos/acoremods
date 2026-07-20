@@ -136,14 +136,6 @@ MountProgression.BuffCeiling.Epic      = 200
 MountProgression.BuffCeiling.Legendary = 400
 
 #
-#    How long after logout the carrier aura is silently re-applied
-#    on login. Past this window the player must remount.
-#    Default: 1800 (30 min) per spec §5.
-#
-
-MountProgression.OfflineGraceSeconds = 1800
-
-#
 #    Whether to still emit "[Mount] Active: ..." in chat on mount cast.
 #    Once the buff-tray icon is visible this may feel redundant; set 0
 #    to silence the per-cast line.

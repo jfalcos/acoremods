@@ -1,4 +1,6 @@
 #include "MountProgressionMgr.h"
+#include "PropertyOverrideMgr.h"
+
 #include "Chat.h"
 #include "Config.h"
 #include "Creature.h"
@@ -241,14 +243,73 @@ uint32 MountProgressionMgr::ComputeBuffMagnitude(CatalogEntry const* entry,
         magnitude = 0.0;
     return static_cast<uint32>(std::round(magnitude));
 }
+namespace
+{
+    // Buff stats ride the Property Override System (mod-property-override,
+    // source 'mount'); the carrier aura is a zero-stat tray-icon cosmetic.
+    // Arcane's legacy two-effect carrier (spell damage + healing) maps to
+    // unified WotLK spell power — behaviorally near-identical.
+    mod_property_override::Property MapMountTypeToProperty(MountType t)
+    {
+        using mod_property_override::Property;
+        switch (t)
+        {
+            case MountType::Stamina:    return Property::Stamina;
+            case MountType::Predator:   return Property::AttackPower;
+            case MountType::Agility:    return Property::Agility;
+            case MountType::Mechanical: return Property::Armor;
+            case MountType::Arcane:     return Property::SpellPower;
+            default:                    return Property::Stamina;
+        }
+    }
+}
+
 void MountProgressionMgr::ApplyMountBuff(Player* player,
                                          CatalogEntry const* entry,
                                          uint16 level)
 {
-    // Skip dead/ghost players: the carrier spell is non-passive and not flagged
-    // ALLOW_DEAD_TARGET, so AddAura() returns null for them (which logged a misleading
-    // "spell_dbc row missing or immune?" warning, e.g. from OnPlayerReleasedGhost). The buff
-    // re-applies naturally on resurrect/remount.
+    if (!_enabled || !player || !entry)
+        return;
+    if (static_cast<size_t>(entry->type) >= static_cast<size_t>(MountType::MAX))
+        return;
+
+    ApplyMountBuffStats(player, entry, level);
+    ApplyMountBuffAura(player, entry);
+}
+
+void MountProgressionMgr::ApplyMountBuffStats(Player* player,
+                                              CatalogEntry const* entry,
+                                              uint16 level)
+{
+    // Permanent (durationSecs = 0) by design: the bond lasts until another
+    // mount is activated, never expires on a timer. Runs regardless of
+    // alive-state — stat modifiers are engine-safe on dead players, which is
+    // why only the aura needs ghost-release reapply.
+    int32 amount = static_cast<int32>(ComputeBuffMagnitude(entry, level));
+
+    auto& props = mod_property_override::PropertyOverrideMgr::Instance();
+    props.ClearPlayerOverrides(player, "mount");
+    if (!props.SetPlayerOverride(player, "mount",
+                                 MapMountTypeToProperty(entry->type), amount, 0))
+        LOG_WARN("module",
+                 "mod-mount-progression: SetPlayerOverride failed for guid {} "
+                 "(mount {}); is mod-property-override enabled?",
+                 player->GetGUID().GetCounter(), entry->spellId);
+    else if (_debug)
+        LOG_INFO("module",
+                 "mod-mount-progression: set 'mount' override {} +{} for guid {} "
+                 "(mount {} lvl {})",
+                 BuffEffectLabel(entry->type), amount,
+                 player->GetGUID().GetCounter(), entry->spellId, level);
+}
+
+void MountProgressionMgr::ApplyMountBuffAura(Player* player, CatalogEntry const* entry)
+{
+    // Cosmetic only: carrier rows carry zero base points, so the aura applies
+    // no stats — it exists for the buff-tray icon. Skip dead/ghost players:
+    // the carrier is non-passive and not ALLOW_DEAD_TARGET, so AddAura()
+    // returns null for them; it re-applies on resurrect (OnPlayerReleasedGhost
+    // path) or remount.
     if (!_enabled || !player || !entry || !player->IsAlive())
         return;
 
@@ -260,32 +321,18 @@ void MountProgressionMgr::ApplyMountBuff(Player* player,
     if (!carrierId)
         return;
 
-    int32 amount = static_cast<int32>(ComputeBuffMagnitude(entry, level));
+    for (size_t i = 0; i < static_cast<size_t>(MountType::MAX); ++i)
+        if (_carrierSpell[i])
+            player->RemoveAurasDueToSpell(_carrierSpell[i]);
 
-    RemoveMountBuff(player);
-
-    Aura* aura = player->AddAura(carrierId, player);
-    if (!aura)
-    {
+    if (!player->AddAura(carrierId, player))
         LOG_WARN("module",
                  "mod-mount-progression: AddAura({}) failed for guid {} "
                  "(mount {}, type {}); spell_dbc row missing or immune?",
                  carrierId, player->GetGUID().GetCounter(),
                  entry->spellId, TypeName(entry->type));
-        return;
-    }
-
-    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
-        if (AuraEffect* eff = aura->GetEffect(i))
-            eff->ChangeAmount(amount);
-
-    if (_debug)
-        LOG_INFO("module",
-                 "mod-mount-progression: applied carrier {} ({}) amount={} "
-                 "to guid {} for mount {} lvl {}",
-                 carrierId, TypeName(entry->type), amount,
-                 player->GetGUID().GetCounter(), entry->spellId, level);
 }
+
 void MountProgressionMgr::RemoveMountBuff(Player* player)
 {
     if (!player)
@@ -293,6 +340,8 @@ void MountProgressionMgr::RemoveMountBuff(Player* player)
     for (size_t i = 0; i < static_cast<size_t>(MountType::MAX); ++i)
         if (_carrierSpell[i])
             player->RemoveAurasDueToSpell(_carrierSpell[i]);
+    mod_property_override::PropertyOverrideMgr::Instance()
+        .ClearPlayerOverrides(player, "mount");
 }
 
 }  // namespace mod_mount_progression

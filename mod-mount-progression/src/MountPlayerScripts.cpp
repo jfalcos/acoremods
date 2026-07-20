@@ -46,8 +46,9 @@ namespace
             CatalogEntry const* entry = mgr.GetCatalogEntry(spellId);
             if (!entry)
                 return;
-            MountProgress const* mp = mgr.GetProgress(player, spellId);
-            mgr.ApplyMountBuff(player, entry, mp ? mp->level : 1);
+            // Aura only: the stat rows never dropped through death, so a full
+            // reapply would just churn the override table.
+            mgr.ApplyMountBuffAura(player, entry);
         }
 
         void OnPlayerSave(Player* player) override
