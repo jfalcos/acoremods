@@ -22,6 +22,8 @@ with mount bonds and item overrides.
 .paragon perks          list perk ranks, totals, next-rank costs
 .paragon buy <perk>     buy the next rank (Strength/Agility/Stamina/
                         Intellect/Spirit/AttackPower/SpellPower)
+.paragon upgrade <slot> <property>   buy an item-upgrade chunk (also via NPC)
+.paragon upgrades <slot>             show an item's upgrades + budget
 ```
 
 GM: `.paragon addpx / setlevel / coins / resetperks / debug / reload / vendor`.
@@ -45,9 +47,18 @@ GM: `.paragon addpx / setlevel / coins / resetperks / debug / reload / vendor`.
 - **Perks**: per-character, ranked; cost = `1 + ranks/CostStepEvery` coins;
   values and caps fully config-tunable. Rank truth in `paragon_perk_ranks`;
   applied stat lives in the override row.
+- **Item upgrades** (proposal 4): coins buy flat-stat chunks onto a SPECIFIC
+  equipped item instance — any of the 40 supported properties, capped by an
+  item-level budget (`BudgetPercent`% of the item's native stat budget; the
+  quality slopes are fitted against the real item corpus — see the conf).
+  The mod-property-override row IS the entire upgrade state: no extra table,
+  upgrades ride the instance through trades/mail (activating at the new
+  owner's next login) and show in tooltips via PropertyOverlay. Cost per
+  chunk rises 1→4 coins as the item's budget fills.
 - **Quartermaster** (creature 96000) is seeded but not spawned — place one
-  with `.npc add 96000` wherever fits your world. Vendor stock rotates on a
-  4-week cycle (`paragon_vendor_stock.week_id` 0-3).
+  with `.npc add 96000` wherever fits your world. Gossip: perks, item
+  upgrades (slot → category → stat), and the cosmetics stock, which rotates
+  on a 4-week cycle (`paragon_vendor_stock.week_id` 0-3).
 - Dormant: `season*` columns and the old leaderboard concept (future work).
 
 Tests: `tests/ParagonPerksTests.cpp` (gtest, via `mod-paragon.cmake`,

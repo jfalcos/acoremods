@@ -1,10 +1,12 @@
 #include "ParagonMgr.h"
 
 #include "ParagonStrings.h"
+#include "PropertyOverrideAddonMsg.h"
 #include "PropertyOverrideMgr.h"
 #include "RewardDispatcher.h"
 
 #include "Chat.h"
+#include "Item.h"
 #include "Config.h"
 #include "DatabaseEnv.h"
 #include "Log.h"
@@ -72,6 +74,10 @@ void ParagonMgr::LoadConfig()
     _perkCfg.maxRanks = sConfigMgr->GetOption<uint32>("Paragon.Perk.MaxRanks", 20);
     _perkCfg.costStepEvery = sConfigMgr->GetOption<uint32>("Paragon.Perk.CostStepEvery", 5);
     _perkMinLevel = sConfigMgr->GetOption<uint32>("Paragon.Perk.MinLevel", 30);
+
+    _itemUpgradeEnabled = sConfigMgr->GetOption<bool>("Paragon.ItemUpgrade.Enable", true);
+    _upgradeCfg.budgetPercent =
+        sConfigMgr->GetOption<uint32>("Paragon.ItemUpgrade.BudgetPercent", 30) / 100.0f;
     static constexpr std::array<char const*, perks::PERK_SET.size()> VALUE_KEYS =
     {
         "Paragon.Perk.ValuePerRank.Strength",
@@ -158,7 +164,7 @@ void ParagonMgr::LoadPlayer(Player* player)
         } while (qr->NextRow());
     }
     // The applied stats live in mod-property-override's own rows (source
-    // 'paragon'), reloaded by that module — no reapply needed here.
+    // 'paragon'), reloaded by that module - no reapply needed here.
 }
 
 void ParagonMgr::UnloadPlayer(Player* player)
@@ -355,9 +361,74 @@ bool ParagonMgr::TryPurchasePerk(Player* player, perks::Property prop)
         guidLow, static_cast<uint8>(prop), ranks);
     ApplyPerkOverride(player, prop, ranks);
 
-    ch.PSendSysMessage("|cffffd100[Paragon]|r {} rank {}/{} — total |cff40ff40+{}|r.",
+    ch.PSendSysMessage("|cffffd100[Paragon]|r {} rank {}/{} - total |cff40ff40+{}|r.",
                        PropertyName(prop), ranks, _perkCfg.maxRanks,
                        perks::TotalValue(_perkCfg, *idx, ranks));
+    return true;
+}
+
+bool ParagonMgr::TryPurchaseItemUpgrade(Player* player, Item* item, upgrades::Property prop)
+{
+    if (!_enabled || !_itemUpgradeEnabled || !player || !item)
+        return false;
+
+    ChatHandler ch(player->GetSession());
+    if (player->GetLevel() < _perkMinLevel)
+    {
+        ch.PSendSysMessage("|cffffd100[Paragon]|r Item upgrades unlock at level {}.",
+                           _perkMinLevel);
+        return false;
+    }
+
+    upgrades::PropertyDef const* def = upgrades::FindDef(prop);
+    ItemTemplate const* proto = item->GetTemplate();
+    if (!def || !proto)
+        return false;
+
+    auto& props = mod_property_override::PropertyOverrideMgr::Instance();
+    ObjectGuid::LowType itemGuid = item->GetGUID().GetCounter();
+    auto rows = props.GetActiveOverrides(player, itemGuid);
+
+    float budget = upgrades::UpgradeBudget(_upgradeCfg, proto->Quality, proto->ItemLevel);
+    float spent = upgrades::BudgetSpent(rows);
+    float chunkCost = def->weight * static_cast<float>(def->chunk);
+    if (spent + chunkCost > budget + 0.001f)
+    {
+        ch.PSendSysMessage("|cffffd100[Paragon]|r {} has no room for that upgrade "
+                           "(budget {:.0f}/{:.0f}).", proto->Name1, spent, budget);
+        return false;
+    }
+
+    uint32 coins = upgrades::CostForNextChunk(budget > 0.f ? spent / budget : 1.f);
+    if (player->GetItemCount(_coinItemId, false) < coins)
+    {
+        ch.PSendSysMessage("|cffffd100[Paragon]|r You need {} Paragon Coin(s) for that upgrade.",
+                           coins);
+        return false;
+    }
+
+    int32 current = 0;
+    for (auto const& row : rows)
+        if (row.property == static_cast<uint8>(prop))
+        {
+            current = row.value;
+            break;
+        }
+
+    player->DestroyItemCount(_coinItemId, coins, true);
+    if (!props.AddOverride(player, item, prop, current + static_cast<int32>(def->chunk), 0))
+    {
+        LOG_WARN("module", "mod-paragon: AddOverride failed for item {} (player {})",
+                 itemGuid, player->GetGUID().GetCounter());
+        return false;
+    }
+    props.SendAddonMessage(player, mod_property_override::addon::BuildInvalidate());
+
+    ch.PSendSysMessage("|cffffd100[Paragon]|r {}: {} |cff40ff40+{} -> +{}|r "
+                       "(budget {:.0f}/{:.0f}, paid {} coin(s)).",
+                       proto->Name1, def->label, current,
+                       current + static_cast<int32>(def->chunk),
+                       spent + chunkCost, budget, coins);
     return true;
 }
 

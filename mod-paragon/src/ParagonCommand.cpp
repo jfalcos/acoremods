@@ -5,6 +5,7 @@
 #include "Chat.h"
 #include "ChatCommand.h"
 #include "DatabaseEnv.h"
+#include "Item.h"
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "WorldSession.h"
@@ -107,14 +108,16 @@ namespace
             Property prop = perks::PERK_SET[i];
             uint32 ranks = pm.GetPerkRanks(player->GetGUID().GetCounter(), prop);
             uint32 cost = perks::CostForNextRank(cfg, ranks);
+            uint32 total = perks::TotalValue(cfg, i, ranks);
             if (cost)
-                handler->PSendSysMessage("  {} — rank {}/{} (+{}) — next: {} coin(s)",
-                                         PropertyName(prop), ranks, cfg.maxRanks,
-                                         perks::TotalValue(cfg, i, ranks), cost);
+                handler->PSendSysMessage("  {} |cff9d9d9d+{}|r |cff1eff00+{}|r  "
+                                         "|cffffd100rank {}/{}, {} coin(s)|r",
+                                         PropertyName(prop), total,
+                                         perks::TotalValue(cfg, i, ranks + 1),
+                                         ranks, cfg.maxRanks, cost);
             else
-                handler->PSendSysMessage("  {} — rank {}/{} (+{}) — MAX",
-                                         PropertyName(prop), ranks, cfg.maxRanks,
-                                         perks::TotalValue(cfg, i, ranks));
+                handler->PSendSysMessage("  |cff9d9d9d{} +{} (rank {}/{} MAX)|r",
+                                         PropertyName(prop), total, ranks, cfg.maxRanks);
         }
         handler->SendSysMessage("Buy with .paragon buy <perk> or at the Paragon Quartermaster.");
         return true;
@@ -142,6 +145,77 @@ namespace
         }
 
         ParagonMgr::Instance().TryPurchasePerk(player, *prop);
+        return true;
+    }
+
+    bool HandleUpgradeCmd(ChatHandler* handler, char const* args)
+    {
+        Player* player = CmdPlayer(handler);
+        if (!player)
+            return false;
+
+        std::istringstream in(args ? args : "");
+        uint32 slot = 0;
+        std::string token;
+        if (!(in >> slot >> token) || slot >= EQUIPMENT_SLOT_END)
+        {
+            handler->SendSysMessage("Usage: .paragon upgrade <slot 0-18> <property>");
+            return true;
+        }
+
+        auto prop = ParseProperty(token);
+        if (!prop)
+        {
+            handler->PSendSysMessage("Unknown property '{}'.", token);
+            return true;
+        }
+
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, static_cast<uint8>(slot));
+        if (!item)
+        {
+            handler->PSendSysMessage("No item equipped in slot {}.", slot);
+            return true;
+        }
+
+        ParagonMgr::Instance().TryPurchaseItemUpgrade(player, item, *prop);
+        return true;
+    }
+
+    bool HandleUpgradesCmd(ChatHandler* handler, char const* args)
+    {
+        Player* player = CmdPlayer(handler);
+        if (!player)
+            return false;
+
+        std::istringstream in(args ? args : "");
+        uint32 slot = 0;
+        if (!(in >> slot) || slot >= EQUIPMENT_SLOT_END)
+        {
+            handler->SendSysMessage("Usage: .paragon upgrades <slot 0-18>");
+            return true;
+        }
+
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, static_cast<uint8>(slot));
+        if (!item)
+        {
+            handler->PSendSysMessage("No item equipped in slot {}.", slot);
+            return true;
+        }
+
+        auto& pm = ParagonMgr::Instance();
+        auto& props = mod_property_override::PropertyOverrideMgr::Instance();
+        ItemTemplate const* proto = item->GetTemplate();
+        auto rows = props.GetActiveOverrides(player, item->GetGUID().GetCounter());
+        float budget = upgrades::UpgradeBudget(pm.UpgradeCfg(),
+                                               proto->Quality, proto->ItemLevel);
+        handler->PSendSysMessage("{} - |cffffd100upgrade budget {:.0f}/{:.0f}|r:",
+                                 proto->Name1, upgrades::BudgetSpent(rows), budget);
+        for (auto const& row : rows)
+            handler->PSendSysMessage("  {} |cff1eff00+{}|r",
+                                     PropertyName(static_cast<Property>(row.property)),
+                                     row.value);
+        if (rows.empty())
+            handler->SendSysMessage("  (no upgrades yet)");
         return true;
     }
 
@@ -244,7 +318,7 @@ namespace
         do
         {
             Field* f = qr->Fetch();
-            handler->PSendSysMessage("  slot {} — item {} — {} coin(s)",
+            handler->PSendSysMessage("  slot {} - item {} - {} coin(s)",
                                      f[0].Get<uint8>(), f[1].Get<uint32>(),
                                      f[2].Get<uint8>());
         } while (qr->NextRow());
@@ -265,6 +339,8 @@ namespace
                 { "toggle",     HandleToggleCmd,     SEC_PLAYER,     Console::No },
                 { "perks",      HandlePerksCmd,      SEC_PLAYER,     Console::No },
                 { "buy",        HandleBuyCmd,        SEC_PLAYER,     Console::No },
+                { "upgrade",    HandleUpgradeCmd,    SEC_PLAYER,     Console::No },
+                { "upgrades",   HandleUpgradesCmd,   SEC_PLAYER,     Console::No },
                 { "addpx",      HandleAddPxCmd,      SEC_GAMEMASTER, Console::No },
                 { "setlevel",   HandleSetLevelCmd,   SEC_GAMEMASTER, Console::No },
                 { "coins",      HandleCoinsCmd,      SEC_GAMEMASTER, Console::No },

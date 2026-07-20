@@ -5,7 +5,8 @@
 
 get_property(_ACORE_MODULE_TEST_SOURCES GLOBAL PROPERTY ACORE_MODULE_TEST_SOURCES)
 list(APPEND _ACORE_MODULE_TEST_SOURCES
-    "${CMAKE_CURRENT_LIST_DIR}/tests/ParagonPerksTests.cpp")
+    "${CMAKE_CURRENT_LIST_DIR}/tests/ParagonPerksTests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/tests/ParagonItemUpgradesTests.cpp")
 set_property(GLOBAL PROPERTY ACORE_MODULE_TEST_SOURCES
     "${_ACORE_MODULE_TEST_SOURCES}")
 

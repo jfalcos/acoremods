@@ -50,6 +50,14 @@ Combine multiple items into one with blended stats.
 
 ## 4. Item upgrade system (ties into AA points)
 
+> **Status (2026-07-20): shipped inside `mod-paragon`** — Paragon Coins buy
+> flat-stat chunks onto specific item instances (override rows ARE the state),
+> capped by an item-level budget fitted against the real item corpus, via the
+> Quartermaster gossip (WoW-convention "Total (base+bonus)" rows, dark
+> parchment palette) or `.paragon upgrade`. Verified in-game. Native vendor
+> frames / coin extended-costs remain an MPQ-patch unlock (client
+> ItemExtendedCost.dbc has no rows for commandeered items — verified).
+
 Spend points to add stat bonuses (Stamina, Attack Power, etc.) to a *specific* item
 instance, without interfering with real enchants/gems/sockets, supporting multiple
 stacked/arbitrary stats.

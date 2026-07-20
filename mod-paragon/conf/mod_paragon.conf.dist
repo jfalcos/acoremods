@@ -108,6 +108,22 @@ Paragon.Perk.ValuePerRank.Spirit = 5
 Paragon.Perk.ValuePerRank.AttackPower = 10
 Paragon.Perk.ValuePerRank.SpellPower = 6
 
+#
+#    Item upgrades — spend coins to add flat stats to a specific equipped item
+#    instance (applied as mod-property-override rows; shown by PropertyOverlay).
+#    Budget cap per item = BudgetPercent% of its native stat budget, where the
+#    native budget = slope(Quality) x ItemLevel with slopes FITTED against the
+#    real item corpus (18k+ equippables, 2026-07-19):
+#        green 0.41 / blue 0.58 / epic 1.20 weighted points per ItemLevel.
+#    Example at 30%: ilvl-200 epic -> ~72 points (~14 purchases); lvl-20
+#    green -> ~2.5 points (one small purchase). Coin cost per purchase rises
+#    from 1 to 4 as the item's budget fills. Purchases share the
+#    Paragon.Perk.MinLevel gate.
+#
+
+Paragon.ItemUpgrade.Enable = 1
+Paragon.ItemUpgrade.BudgetPercent = 30
+
 #    Paragon.Debug
 #        Description: Verbose module logging.
 #        Default:     0

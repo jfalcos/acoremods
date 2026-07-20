@@ -2,11 +2,13 @@
 
 #include "Define.h"
 #include "ObjectGuid.h"
+#include "ParagonItemUpgrades.h"
 #include "ParagonPerks.h"
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 
+class Item;
 class Player;
 
 namespace mod_paragon
@@ -60,6 +62,13 @@ namespace mod_paragon
         bool TryPurchasePerk(Player* player, perks::Property prop);
         void ResetPerks(Player* player); // GM: clears ranks + override rows
 
+        // Item upgrades: buys one chunk of `prop` onto the item instance,
+        // capped by the item's ilvl/quality budget. Chat message sent on any
+        // failure. The override row is the entire upgrade state.
+        bool IsItemUpgradeEnabled() const { return _itemUpgradeEnabled; }
+        upgrades::UpgradeConfig const& UpgradeCfg() const { return _upgradeCfg; }
+        bool TryPurchaseItemUpgrade(Player* player, Item* item, upgrades::Property prop);
+
         void OnLogin(Player* player); // splash + pending reward delivery
 
     private:
@@ -101,5 +110,7 @@ namespace mod_paragon
         std::unordered_set<uint32> _blockedMaps;
         std::unordered_set<uint32> _milestoneLevels;
         perks::PerkConfig _perkCfg;
+        bool _itemUpgradeEnabled = true;
+        upgrades::UpgradeConfig _upgradeCfg;
     };
 }
