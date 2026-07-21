@@ -94,6 +94,9 @@ public:
     void LoadConfig();
     bool IsEnabled() const { return _enabled; }
     bool IsDebug() const { return _debug; }
+    // When false (default), playerbot sessions skip the login load and the
+    // per-tick reconcile — bots never carry overrides unless opted in.
+    bool ProcessBots() const { return _processBots; }
 
     // One-time startup sweep: drop rows whose item_instance no longer exists.
     void StartupCleanup();
@@ -164,6 +167,7 @@ private:
     std::unordered_map<ObjectGuid::LowType, PlayerState> _players; // by player guid
     bool _enabled = true;
     bool _debug = false;
+    bool _processBots = false;
 };
 
 } // namespace mod_property_override

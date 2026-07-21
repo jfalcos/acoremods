@@ -278,3 +278,12 @@ MountProgression.StarterQuest.QuestId = 900000
 #
 
 MountProgression.Debug = 0
+
+#
+#    ProcessBots — process playerbot sessions. Off by default: bots mount
+#    constantly, and without this gate the random-bot population accrues
+#    mount XP, writes DB state, and gains bond buffs. Turn on only if you
+#    want groomed party-bots to keep mount bonds.
+#
+
+MountProgression.ProcessBots = 0

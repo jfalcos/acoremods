@@ -24,3 +24,12 @@ PropertyOverride.Enable = 1
 #        Default:     0
 
 PropertyOverride.Debug = 0
+
+#    PropertyOverride.ProcessBots
+#        Description: Process playerbot sessions (login load + per-tick
+#                     reconcile). Off by default: bots never carry override
+#                     rows, so this only spends DB queries and CPU on the
+#                     random-bot population.
+#        Default:     0
+
+PropertyOverride.ProcessBots = 0

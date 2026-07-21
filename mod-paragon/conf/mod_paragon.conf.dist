@@ -129,3 +129,12 @@ Paragon.ItemUpgrade.BudgetPercent = 30
 #        Default:     0
 
 Paragon.Debug = 0
+
+#    Paragon.ProcessBots
+#        Description: Process playerbot sessions (login load + XP divert
+#                     hook). Off by default: bot accounts never divert XP
+#                     or spend coins, so this only spends DB queries and
+#                     CPU on the random-bot population.
+#        Default:     0
+
+Paragon.ProcessBots = 0

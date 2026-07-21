@@ -35,8 +35,9 @@ void PropertyOverrideMgr::LoadConfig()
 {
     _enabled = sConfigMgr->GetOption<bool>("PropertyOverride.Enable", true);
     _debug = sConfigMgr->GetOption<bool>("PropertyOverride.Debug", false);
-    LOG_INFO("module", "mod-property-override: config loaded (enable={}, debug={}).",
-             _enabled, _debug);
+    _processBots = sConfigMgr->GetOption<bool>("PropertyOverride.ProcessBots", false);
+    LOG_INFO("module", "mod-property-override: config loaded (enable={}, debug={}, "
+             "processBots={}).", _enabled, _debug, _processBots);
 }
 
 void PropertyOverrideMgr::StartupCleanup()

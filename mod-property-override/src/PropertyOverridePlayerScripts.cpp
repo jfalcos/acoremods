@@ -5,6 +5,7 @@
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "SharedDefines.h"
+#include "WorldSession.h"
 
 #include <algorithm>
 
@@ -41,6 +42,16 @@ namespace
             static_cast<uint8>(query.slot - 1));
     }
 
+    // Playerbot sessions are full Player objects running every hook; unless
+    // opted in they skip the login DB load and the per-tick reconcile.
+    // Logout/unload stays ungated (harmless no-op for never-loaded players,
+    // self-healing if the config flips mid-session).
+    bool SkipBot(Player* player)
+    {
+        return !PropertyOverrideMgr::Instance().ProcessBots() &&
+               player && player->GetSession() && player->GetSession()->IsBot();
+    }
+
     class PO_PlayerScript : public PlayerScript
     {
     public:
@@ -48,6 +59,8 @@ namespace
 
         void OnPlayerLogin(Player* player) override
         {
+            if (SkipBot(player))
+                return;
             auto& mgr = PropertyOverrideMgr::Instance();
             mgr.LoadPlayer(player);
             mgr.Sync(player);
@@ -78,6 +91,8 @@ namespace
 
         void OnPlayerUpdate(Player* player, uint32 diffMs) override
         {
+            if (SkipBot(player))
+                return;
             PropertyOverrideMgr::Instance().OnPlayerTick(player, diffMs);
         }
 

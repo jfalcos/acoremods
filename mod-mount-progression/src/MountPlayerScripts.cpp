@@ -7,11 +7,23 @@
 #include "ScriptMgr.h"
 #include "Spell.h"
 #include "SpellInfo.h"
+#include "WorldSession.h"
 
 using namespace mod_mount_progression;
 
 namespace
 {
+    // Playerbot sessions skip every hook unless opted in
+    // (MountProgression.ProcessBots): bots mount constantly, and without
+    // this gate the random-bot population accrues mount XP, writes DB
+    // state, and gains bond buffs. Logout stays ungated (save/unload
+    // no-op for never-loaded state, self-healing on config flips).
+    bool SkipBot(Player* player)
+    {
+        return !MountProgressionMgr::Instance().ProcessBots() &&
+               player && player->GetSession() && player->GetSession()->IsBot();
+    }
+
     class Mount_PlayerScript : public PlayerScript
     {
     public:
@@ -19,6 +31,8 @@ namespace
 
         void OnPlayerLogin(Player* player) override
         {
+            if (SkipBot(player))
+                return;
             auto& mgr = MountProgressionMgr::Instance();
             mgr.LoadPlayerState(player);
             mgr.LoadActiveMountFromDB(player);
@@ -37,7 +51,7 @@ namespace
 
         void OnPlayerReleasedGhost(Player* player) override
         {
-            if (!player)
+            if (!player || SkipBot(player))
                 return;
             auto& mgr = MountProgressionMgr::Instance();
             uint32 spellId = mgr.GetActiveMount(player);
@@ -58,12 +72,14 @@ namespace
 
         void OnPlayerCreatureKill(Player* player, Creature* killed) override
         {
+            if (SkipBot(player))
+                return;
             MountProgressionMgr::Instance().OnCreatureKill(player, killed);
         }
 
         void OnPlayerSpellCast(Player* player, Spell* spell, bool /*skipCheck*/) override
         {
-            if (!player || !spell)
+            if (!player || !spell || SkipBot(player))
                 return;
             SpellInfo const* info = spell->GetSpellInfo();
             if (!info)
@@ -73,17 +89,23 @@ namespace
 
         void OnPlayerUpdate(Player* player, uint32 p_time) override
         {
+            if (SkipBot(player))
+                return;
             MountProgressionMgr::Instance().OnPlayerTick(player, p_time);
         }
 
         void OnPlayerUpdateArea(Player* player, uint32 oldArea, uint32 newArea) override
         {
+            if (SkipBot(player))
+                return;
             MountProgressionMgr::Instance().OnPlayerAreaChange(player, oldArea, newArea);
         }
 
         void OnPlayerLootItem(Player* player, Item* /*item*/, uint32 /*count*/,
                               ObjectGuid lootguid) override
         {
+            if (SkipBot(player))
+                return;
             MountProgressionMgr::Instance().OnPlayerLoot(player, lootguid);
         }
     };

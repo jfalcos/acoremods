@@ -9,6 +9,15 @@ using namespace mod_paragon;
 
 namespace
 {
+    // Playerbot sessions skip the login DB load and the XP hook unless
+    // opted in (Paragon.ProcessBots). Logout stays ungated: UnloadPlayer
+    // no-ops safely for never-loaded players.
+    bool SkipBot(Player* player)
+    {
+        return !ParagonMgr::Instance().ProcessBots() &&
+               player && player->GetSession() && player->GetSession()->IsBot();
+    }
+
     class Paragon_PlayerScript : public PlayerScript
     {
     public:
@@ -21,6 +30,8 @@ namespace
         {
             auto& pm = ParagonMgr::Instance();
             if (!pm.IsEnabled() || !player || !amount || !player->GetSession())
+                return;
+            if (SkipBot(player))
                 return;
 
             uint8 level = player->GetLevel();
@@ -57,6 +68,8 @@ namespace
 
         void OnPlayerLogin(Player* player) override
         {
+            if (SkipBot(player))
+                return;
             auto& pm = ParagonMgr::Instance();
             pm.LoadPlayer(player);
             pm.OnLogin(player);

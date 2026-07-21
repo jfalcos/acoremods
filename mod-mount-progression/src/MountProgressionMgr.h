@@ -70,6 +70,9 @@ public:
     void LoadCatalog();
 
     bool IsEnabled() const { return _enabled; }
+    // When false (default), playerbot sessions skip every hook: no mount
+    // XP accrual, no bond buffs, no DB state for the random-bot population.
+    bool ProcessBots() const { return _processBots; }
     bool IsDebug() const { return _debug; }
     uint16 GetMaxLevel() const { return _maxLevel; }
 
@@ -192,6 +195,7 @@ private:
     double CurveFraction(uint16 level) const;
 
     bool _enabled = true;
+    bool _processBots = false;
     bool _debug = false;
     uint16 _maxLevel = 60;
     uint32 _xpBase[static_cast<size_t>(MountRarity::MAX)] = {10, 40, 120, 400, 4000};

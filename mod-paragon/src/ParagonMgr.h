@@ -25,6 +25,9 @@ namespace mod_paragon
 
         bool IsEnabled() const { return _enabled; }
         bool Debug() const { return _debug; }
+        // When false (default), playerbot sessions skip the login load and
+        // the XP-divert hook — bot accounts can never accrue PX.
+        bool ProcessBots() const { return _processBots; }
         void SetDebug(bool d) { _debug = d; }
         uint32 PxPerLevel() const { return _pxPerLevel; }
         uint32 CoinItemId() const { return _coinItemId; }
@@ -98,6 +101,7 @@ namespace mod_paragon
         bool _enabled = true;
         bool _loginSplash = true;
         bool _debug = false;
+        bool _processBots = false;
         uint32 _pxPerLevel = 1670800;
         uint32 _coinItemId = 37711;
         uint32 _qmNpcEntry = 96000;

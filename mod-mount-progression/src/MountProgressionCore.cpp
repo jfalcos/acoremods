@@ -107,6 +107,7 @@ void MountProgressionMgr::LoadConfig()
 {
     _enabled   = sConfigMgr->GetOption<bool>("MountProgression.Enable", true);
     _debug     = sConfigMgr->GetOption<bool>("MountProgression.Debug", false);
+    _processBots = sConfigMgr->GetOption<bool>("MountProgression.ProcessBots", false);
     _maxLevel  = static_cast<uint16>(
         sConfigMgr->GetOption<uint32>("MountProgression.MaxLevel", 60));
 

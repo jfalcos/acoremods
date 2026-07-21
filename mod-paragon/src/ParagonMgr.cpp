@@ -58,6 +58,7 @@ void ParagonMgr::LoadConfig()
     _pxPerLevel = sConfigMgr->GetOption<uint32>("Paragon.PXPerLevel", 1670800);
     _loginSplash = sConfigMgr->GetOption<bool>("Paragon.LoginSplash", true);
     _debug = sConfigMgr->GetOption<bool>("Paragon.Debug", false);
+    _processBots = sConfigMgr->GetOption<bool>("Paragon.ProcessBots", false);
     _coinItemId = sConfigMgr->GetOption<uint32>("Paragon.CoinItemId", 37711);
     _qmNpcEntry = sConfigMgr->GetOption<uint32>("Paragon.QuartermasterEntry", 96000);
     _minToggleLevel = sConfigMgr->GetOption<uint32>("Paragon.MinToggleLevel", 30);
