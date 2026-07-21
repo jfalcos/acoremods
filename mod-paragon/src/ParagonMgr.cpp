@@ -327,6 +327,15 @@ bool ParagonMgr::TryPurchasePerk(Player* player, perks::Property prop)
     if (!idx)
         return false;
 
+    // Never take payment the stat engine can't honor (degenerate config:
+    // mod-property-override disabled while paragon stays on).
+    if (!mod_property_override::PropertyOverrideMgr::Instance().IsEnabled())
+    {
+        ch.SendSysMessage("|cffffd100[Paragon]|r The stat engine "
+                          "(mod-property-override) is disabled - purchases are off.");
+        return false;
+    }
+
     // Spend gate: keeps funded low-level alts from buying bracket-breaking
     // stats (the earn side is gated by MinToggleLevel already).
     if (player->GetLevel() < _perkMinLevel)
@@ -373,6 +382,12 @@ bool ParagonMgr::TryPurchaseItemUpgrade(Player* player, Item* item, upgrades::Pr
         return false;
 
     ChatHandler ch(player->GetSession());
+    if (!mod_property_override::PropertyOverrideMgr::Instance().IsEnabled())
+    {
+        ch.SendSysMessage("|cffffd100[Paragon]|r The stat engine "
+                          "(mod-property-override) is disabled - purchases are off.");
+        return false;
+    }
     if (player->GetLevel() < _perkMinLevel)
     {
         ch.PSendSysMessage("|cffffd100[Paragon]|r Item upgrades unlock at level {}.",

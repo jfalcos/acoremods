@@ -150,6 +150,14 @@ ItemInfusionMgr::InfuseResult ItemInfusionMgr::TryInfuse(
         return InfuseResult::Rejected;
 
     ChatHandler ch(player->GetSession());
+    // Never take the donor/materials if the stat engine can't honor the
+    // transfer (degenerate config: mod-property-override disabled).
+    if (!mod_property_override::PropertyOverrideMgr::Instance().IsEnabled())
+    {
+        ch.SendSysMessage("|cffffd100[Infusion]|r The stat engine "
+                          "(mod-property-override) is disabled - infusions are off.");
+        return InfuseResult::Rejected;
+    }
     if (player->GetLevel() < _minLevel)
     {
         ch.PSendSysMessage("|cffffd100[Infusion]|r Infusions unlock at level {}.", _minLevel);
