@@ -32,6 +32,12 @@ namespace mod_paragon
         uint32 PxPerLevel() const { return _pxPerLevel; }
         uint32 CoinItemId() const { return _coinItemId; }
         uint32 QuartermasterEntry() const { return _qmNpcEntry; }
+        // Commandeered native entry (see the module's world migration):
+        // the client resolves item icons via its LOCAL Item.dbc keyed by
+        // entry, so a custom entry always renders a red question mark.
+        // 3899 = "Legends of the Gurubashi, Vol 3", an unobtainable
+        // vanilla lore book repurposed as the Paragon Handbook.
+        static constexpr uint32 HANDBOOK_ITEM_ID = 3899;
         bool IsMapBlocked(uint32 mapId) const;
         uint32 MinToggleLevel() const { return _minToggleLevel; }
         uint32 MaxAllocPercentFor(uint8 level) const;
@@ -74,6 +80,10 @@ namespace mod_paragon
 
         void OnLogin(Player* player); // splash + pending reward delivery
 
+        // Mails the Paragon Handbook once per account, the first time a
+        // character is seen at/above MinToggleLevel (login or level-up).
+        void MaybeSendHandbook(Player* player);
+
     private:
         ParagonMgr() = default;
 
@@ -83,6 +93,7 @@ namespace mod_paragon
             uint32 lastRewardLevel = 0;
             uint32 allocPercent = 0;
             bool optOut = false;
+            bool handbookSent = false;
             bool rowExists = false;
             uint32 chars = 0; // online characters of this account
         };

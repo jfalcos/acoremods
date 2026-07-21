@@ -62,6 +62,8 @@ namespace
         SENDER_PERKS = 2,
         SENDER_STOCK = 3,
         SENDER_UPG_SLOTS = 4,           // action = equipment slot -> category menu
+        SENDER_SETTINGS = 5,
+        SENDER_HELP     = 6,
         // Category pick for a slot: sender = SENDER_UPG_CAT_BASE + equipSlot,
         // action = category index (or ACTION_UPG_BACK).
         SENDER_UPG_CAT_BASE = 10,       // 10..28
@@ -77,6 +79,17 @@ namespace
         ACTION_SHOW_UPGRADES = GOSSIP_ACTION_INFO_DEF + 303,
         ACTION_UPG_BACK      = GOSSIP_ACTION_INFO_DEF + 304,
         ACTION_BACK_MAIN     = GOSSIP_ACTION_INFO_DEF + 305,
+        ACTION_SHOW_SETTINGS = GOSSIP_ACTION_INFO_DEF + 306,
+        ACTION_SHOW_HELP     = GOSSIP_ACTION_INFO_DEF + 307,
+        // SENDER_SETTINGS actions
+        ACTION_SET_REFRESH   = GOSSIP_ACTION_INFO_DEF + 370,
+        ACTION_SET_TOGGLE    = GOSSIP_ACTION_INFO_DEF + 371,
+        ACTION_ALLOC_UP      = GOSSIP_ACTION_INFO_DEF + 372,
+        ACTION_ALLOC_DOWN    = GOSSIP_ACTION_INFO_DEF + 373,
+        // SENDER_HELP actions
+        ACTION_HELP_INDEX      = GOSSIP_ACTION_INFO_DEF + 380,
+        ACTION_HELP_TOPIC_BASE = GOSSIP_ACTION_INFO_DEF + 381, // +0..3
+        ACTION_TAKE_HANDBOOK   = GOSSIP_ACTION_INFO_DEF + 389,
         // SENDER_PERKS actions: GOSSIP_ACTION_INFO_DEF + 310 + perkIndex
         ACTION_PERK_BASE  = GOSSIP_ACTION_INFO_DEF + 310,
         // SENDER_STOCK actions: GOSSIP_ACTION_INFO_DEF + 350 + slotIndex
@@ -99,6 +112,11 @@ namespace
         AddGossipItemFor(player, GOSSIP_ICON_VENDOR,
                          "Browse this week's collection (pets & mounts)",
                          SENDER_MAIN, ACTION_SHOW_STOCK);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1,
+                         "Paragon settings (experience diversion)",
+                         SENDER_MAIN, ACTION_SHOW_SETTINGS);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "How does all this work?",
+                         SENDER_MAIN, ACTION_SHOW_HELP);
         AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Nevermind.",
                          SENDER_MAIN, ACTION_CLOSE);
         SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
@@ -285,6 +303,90 @@ namespace
         SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
     }
 
+    void SendSettingsMenu(Player* player, Creature* creature)
+    {
+        auto& pm = ParagonMgr::Instance();
+        uint32 accountId = player->GetSession()->GetAccountId();
+        uint64 lifetimePx = pm.GetLifetimePX(accountId);
+        bool paused = pm.IsOptedOut(accountId);
+        uint32 alloc = pm.GetAllocPercent(accountId);
+        uint32 cap = pm.MaxAllocPercentFor(player->GetLevel());
+
+        ClearGossipMenuFor(player);
+        // Status header (clicking harmlessly refreshes this menu).
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT,
+                         fmt::format("Paragon Level {} - {} / {} PX",
+                                     pm.ComputePL(lifetimePx),
+                                     pm.ComputeProgressInLevel(lifetimePx),
+                                     pm.PxPerLevel()),
+                         SENDER_SETTINGS, ACTION_SET_REFRESH);
+        if (player->GetLevel() < pm.MinToggleLevel())
+            AddGossipItemFor(player, GOSSIP_ICON_CHAT,
+                             fmt::format("{}Diversion begins at level {}{}",
+                                         COL_GRAY, pm.MinToggleLevel(), COL_END),
+                             SENDER_SETTINGS, ACTION_SET_REFRESH);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1,
+                         paused ? "Progression is PAUSED - resume it"
+                                : "Progression is ON - pause it",
+                         SENDER_SETTINGS, ACTION_SET_TOGGLE);
+        if (alloc < cap)
+            AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1,
+                             fmt::format("Divert more experience: {}% -> {}{}%{}",
+                                         alloc, COL_GREEN,
+                                         std::min(alloc + 5, cap), COL_END),
+                             SENDER_SETTINGS, ACTION_ALLOC_UP);
+        else
+            AddGossipItemFor(player, GOSSIP_ICON_CHAT,
+                             fmt::format("{}Diverting {}% - the cap at your level{}",
+                                         COL_GRAY, alloc, COL_END),
+                             SENDER_SETTINGS, ACTION_SET_REFRESH);
+        if (alloc > 0)
+            AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1,
+                             fmt::format("Divert less experience: {}% -> {}{}%{}",
+                                         alloc, COL_GREEN,
+                                         alloc >= 5 ? alloc - 5 : 0, COL_END),
+                             SENDER_SETTINGS, ACTION_ALLOC_DOWN);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Back",
+                         SENDER_MAIN, ACTION_BACK_MAIN);
+        SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
+    }
+
+    // Help pages live in npc_text (world SQL): 96000 = topic index,
+    // 96001+topic = the topic pages, in HELP_TOPICS order.
+    constexpr uint32 NPC_TEXT_HELP_INDEX = 96000;
+    constexpr char const* HELP_TOPICS[] =
+    {
+        "What is Paragon?",
+        "Coins and character perks",
+        "Item upgrades",
+        "The weekly collection",
+    };
+    constexpr uint32 NUM_HELP_TOPICS = 4;
+
+    void SendHelpMenu(Player* player, Creature* creature)
+    {
+        ClearGossipMenuFor(player);
+        for (uint32 i = 0; i < NUM_HELP_TOPICS; ++i)
+            AddGossipItemFor(player, GOSSIP_ICON_CHAT, HELP_TOPICS[i],
+                             SENDER_HELP, ACTION_HELP_TOPIC_BASE + i);
+        if (!player->GetItemCount(ParagonMgr::HANDBOOK_ITEM_ID, true))
+            AddGossipItemFor(player, GOSSIP_ICON_VENDOR,
+                             "Take a copy of the Paragon Handbook",
+                             SENDER_HELP, ACTION_TAKE_HANDBOOK);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Back",
+                         SENDER_MAIN, ACTION_BACK_MAIN);
+        SendGossipMenuFor(player, NPC_TEXT_HELP_INDEX, creature->GetGUID());
+    }
+
+    void SendHelpTopic(Player* player, Creature* creature, uint32 idx)
+    {
+        ClearGossipMenuFor(player);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Back to topics",
+                         SENDER_HELP, ACTION_HELP_INDEX);
+        SendGossipMenuFor(player, NPC_TEXT_HELP_INDEX + 1 + idx,
+                          creature->GetGUID());
+    }
+
     class Paragon_QM_NPC : public CreatureScript
     {
     public:
@@ -309,10 +411,45 @@ namespace
                     SendStockMenu(player, creature);
                 else if (action == ACTION_SHOW_UPGRADES)
                     SendUpgradeSlotMenu(player, creature);
+                else if (action == ACTION_SHOW_SETTINGS)
+                    SendSettingsMenu(player, creature);
+                else if (action == ACTION_SHOW_HELP)
+                    SendHelpMenu(player, creature);
                 else if (action == ACTION_CLOSE)
                     CloseGossipMenuFor(player);
                 else
                     SendMainMenu(player, creature); // "Back"
+                return true;
+            }
+
+            if (sender == SENDER_SETTINGS)
+            {
+                uint32 accountId = player->GetSession()->GetAccountId();
+                uint32 alloc = pm.GetAllocPercent(accountId);
+                if (action == ACTION_SET_TOGGLE)
+                    pm.SetOptOut(accountId, !pm.IsOptedOut(accountId));
+                else if (action == ACTION_ALLOC_UP)
+                    pm.SetAllocPercent(accountId,
+                        std::min(alloc + 5, pm.MaxAllocPercentFor(player->GetLevel())));
+                else if (action == ACTION_ALLOC_DOWN)
+                    pm.SetAllocPercent(accountId, alloc >= 5 ? alloc - 5 : 0);
+                SendSettingsMenu(player, creature); // refresh in every case
+                return true;
+            }
+
+            if (sender == SENDER_HELP)
+            {
+                if (action == ACTION_TAKE_HANDBOOK)
+                {
+                    if (!player->GetItemCount(ParagonMgr::HANDBOOK_ITEM_ID, true))
+                        player->AddItem(ParagonMgr::HANDBOOK_ITEM_ID, 1);
+                    SendHelpMenu(player, creature);
+                }
+                else if (action >= ACTION_HELP_TOPIC_BASE &&
+                         action < ACTION_HELP_TOPIC_BASE + NUM_HELP_TOPICS)
+                    SendHelpTopic(player, creature, action - ACTION_HELP_TOPIC_BASE);
+                else
+                    SendHelpMenu(player, creature); // index / back-to-topics
                 return true;
             }
 

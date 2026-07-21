@@ -102,3 +102,12 @@ void RewardDispatcher::DeliverLevelTo(Player* player, uint32 level)
     if (WorldSession* session = player->GetSession())
         ChatHandler(session).PSendSysMessage(LANG_PARAGON_REWARD_DELIVERED, level);
 }
+
+void RewardDispatcher::SendHandbookTo(Player* player)
+{
+    SendSimpleMail(player, "The Paragon Handbook",
+                   "Every great journey deserves a map. Within these pages: "
+                   "paragon leveling, coins and perks, item upgrades, and "
+                   "infusion. Visit me to begin.\n\n- The Paragon Quartermaster",
+                   ParagonMgr::HANDBOOK_ITEM_ID, 1);
+}

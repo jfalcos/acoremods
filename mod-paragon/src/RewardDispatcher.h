@@ -17,6 +17,10 @@ namespace mod_paragon
         // Deliver a specific paragon level's rewards immediately.
         static void DeliverLevelTo(Player* player, uint32 level);
 
+        // Mail the Paragon Handbook (once-per-account gate lives in
+        // ParagonMgr::MaybeSendHandbook).
+        static void SendHandbookTo(Player* player);
+
     private:
         static bool HasDelivered(uint32 guid, uint32 level);
         static void MarkDelivered(uint32 guid, uint32 level);

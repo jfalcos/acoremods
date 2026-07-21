@@ -50,8 +50,9 @@ Paragon.QuartermasterEntry = 96000
 Paragon.MinToggleLevel = 30
 
 #
-#    XP allocation caps: players choose their divert percentage with .paragon setxp,
-#    clamped to Low below BreakLevel and High at/above it.
+#    XP allocation caps: players choose their divert percentage in the Quartermaster's
+#    "Paragon settings" gossip menu (5% steps) or with .paragon setxp, clamped to Low
+#    below BreakLevel and High at/above it.
 #
 
 Paragon.MaxXPPercent.Low = 30

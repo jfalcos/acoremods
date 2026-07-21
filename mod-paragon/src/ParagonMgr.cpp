@@ -139,7 +139,7 @@ void ParagonMgr::LoadPlayer(Player* player)
     {
         if (QueryResult qr = CharacterDatabase.Query(
                 "SELECT lifetime_px, last_reward_level, paragon_opt_out, "
-                "xp_allocation_percent FROM paragon_account_progress "
+                "xp_allocation_percent, handbook_sent FROM paragon_account_progress "
                 "WHERE account = {}", accountId))
         {
             Field* f = qr->Fetch();
@@ -147,6 +147,7 @@ void ParagonMgr::LoadPlayer(Player* player)
             st.lastRewardLevel = f[1].Get<uint32>();
             st.optOut = f[2].Get<uint8>() != 0;
             st.allocPercent = f[3].Get<uint32>();
+            st.handbookSent = f[4].Get<uint8>() != 0;
             st.rowExists = true;
         }
     }
@@ -203,15 +204,16 @@ void ParagonMgr::PersistAccount(uint32 accountId, AccountState const& st) const
     CharacterDatabase.Execute(
         "INSERT INTO paragon_account_progress "
         "(account, lifetime_px, season_px, last_reward_level, paragon_opt_out, "
-        "xp_allocation_percent, season, updated_at, created_at) "
-        "VALUES ({}, {}, 0, {}, {}, {}, 0, UNIX_TIMESTAMP(), UNIX_TIMESTAMP()) "
+        "xp_allocation_percent, handbook_sent, season, updated_at, created_at) "
+        "VALUES ({}, {}, 0, {}, {}, {}, {}, 0, UNIX_TIMESTAMP(), UNIX_TIMESTAMP()) "
         "ON DUPLICATE KEY UPDATE lifetime_px = VALUES(lifetime_px), "
         "last_reward_level = VALUES(last_reward_level), "
         "paragon_opt_out = VALUES(paragon_opt_out), "
         "xp_allocation_percent = VALUES(xp_allocation_percent), "
+        "handbook_sent = VALUES(handbook_sent), "
         "updated_at = UNIX_TIMESTAMP()",
         accountId, st.lifetimePx, st.lastRewardLevel,
-        st.optOut ? 1 : 0, st.allocPercent);
+        st.optOut ? 1 : 0, st.allocPercent, st.handbookSent ? 1 : 0);
 }
 
 void ParagonMgr::SetAllocPercent(uint32 accountId, uint32 percent)
@@ -481,6 +483,24 @@ void ParagonMgr::OnLogin(Player* player)
         ComputePL(lifetimePx),
         static_cast<unsigned long long>(ComputeProgressInLevel(lifetimePx)),
         _pxPerLevel);
+}
+
+void ParagonMgr::MaybeSendHandbook(Player* player)
+{
+    if (!_enabled || !player || !player->GetSession())
+        return;
+    if (player->GetLevel() < _minToggleLevel)
+        return;
+
+    uint32 accountId = player->GetSession()->GetAccountId();
+    AccountState* st = FindAccount(accountId);
+    if (!st || st->handbookSent) // never-loaded (bot) accounts stay untouched
+        return;
+
+    st->handbookSent = true;
+    st->rowExists = true;
+    PersistAccount(accountId, *st);
+    RewardDispatcher::SendHandbookTo(player);
 }
 
 } // namespace mod_paragon

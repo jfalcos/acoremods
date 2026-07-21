@@ -73,6 +73,14 @@ namespace
             auto& pm = ParagonMgr::Instance();
             pm.LoadPlayer(player);
             pm.OnLogin(player);
+            pm.MaybeSendHandbook(player);
+        }
+
+        void OnPlayerLevelChanged(Player* player, uint8 /*oldLevel*/) override
+        {
+            if (SkipBot(player))
+                return;
+            ParagonMgr::Instance().MaybeSendHandbook(player);
         }
 
         void OnPlayerLogout(Player* player) override

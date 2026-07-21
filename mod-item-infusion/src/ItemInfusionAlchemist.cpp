@@ -57,6 +57,7 @@ namespace
         ACTION_COIN_ADD     = GOSSIP_ACTION_INFO_DEF + 7,
         ACTION_COIN_CLEAR   = GOSSIP_ACTION_INFO_DEF + 8,
         ACTION_INFUSE       = GOSSIP_ACTION_INFO_DEF + 9,
+        ACTION_HELP         = GOSSIP_ACTION_INFO_DEF + 11,
         ACTION_SUB_BASE     = GOSSIP_ACTION_INFO_DEF + 20, // + substance index
         ACTION_DONOR_BASE   = GOSSIP_ACTION_INFO_DEF + 100, // + donor index
     };
@@ -192,8 +193,19 @@ namespace
             }
             AddGossipItemFor(player, GOSSIP_ICON_MONEY_BAG, label, SENDER_TARGETS, slot);
         }
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "How does infusion work?",
+                         SENDER_TARGETS, ACTION_HELP);
         AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Nevermind.", SENDER_TARGETS, ACTION_CLOSE);
         SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
+    }
+
+    // Explainer page (npc_text 96010, seeded by the module's world SQL).
+    void SendHelpPage(Player* player, Creature* creature)
+    {
+        ClearGossipMenuFor(player);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Back",
+                         SENDER_TARGETS, ACTION_BACK_TARGETS);
+        SendGossipMenuFor(player, 96010, creature->GetGUID());
     }
 
     void SendDonorMenu(Player* player, Creature* creature)
@@ -385,6 +397,10 @@ namespace
                         .SendAddonMessage(player, mod_item_infusion::addon::BuildOpen());
                     CloseGossipMenuFor(player);
                 }
+                else if (action == ACTION_HELP)
+                    SendHelpPage(player, creature);
+                else if (action == ACTION_BACK_TARGETS)
+                    SendTargetMenu(player, creature);
                 else
                     CloseGossipMenuFor(player);
                 return true;
