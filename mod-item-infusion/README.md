@@ -94,6 +94,48 @@ all level bands, Minor Healing Potion through Eternal Life),
 MasteredAtLevel}`, `MinLevel` (default 10 — the mastery term, not this
 gate, is the low-level protection), `AlchemistEntry`, `Enable`, `Debug`.
 
+## Testing runbook (in game, as GM)
+
+Setup:
+
+```
+.npc add 96010                   -- spawn the Alchemist (once)
+.additem 37711 20                -- Paragon Coins (mitigation)
+.additem 35625 3                 -- Eternal Life (endgame substance)
+.additem 858 5                   -- Lesser Healing Potion (low-band substance)
+.additem 37644                   -- a stat-rich donor for your bags
+```
+
+Core loop (gossip): Alchemist -> pick an equipped target (row shows its
+current risk; fresh items read `risk 5%`) -> pick a donor -> confirm
+screen shows every transferred stat in the `Total (base+bonus)` grammar
+plus `INFUSE - destruction risk N%`. Infuse: chat reports the absorbed
+stats and next risk; PropertyOverlay tooltip and character sheet update.
+`.propover list <slot>` shows the `[mix]` rows; `.infuse list <slot>`
+shows infused points + next risk. Repeat infusions on one item -> risk
+climbs the curve (5% -> ~50% at paragon-cap-equivalent fill -> 90%).
+
+Window (addon): `/infusion` (or the Alchemist's "Open the Infusion
+Window" row). Drag the equipped target from the character sheet into the
+left well, a bag donor into the right; stats + risk bar appear and match
+the gossip's numbers. Coins/substances re-price the bar live; the Infuse
+popup quotes the exact risk; success clears the donor well, destruction
+clears both.
+
+Mastery (`.character level 15` on a test character): own-level gear
+infuses at plain 5%; an above-level donor adds the red "Beyond your
+mastery: +N%" line (cap +30%); at `.character level 80` all penalties
+vanish (exemption). Low-band substances (Lesser Healing Potion) work on
+starter gear but show "too weak for this gear" against high-req pairs;
+Eternal Life works everywhere but only shaves its percent OF the current
+risk.
+
+Destruction: `.infuse risk 100` -> infuse a junk target -> target and
+donor vanish, rows purge, relog clean. `.infuse risk -1` restores live
+math. Cross-checks: `.paragon upgrades <slot>` on a mixed item ignores
+`[mix]` rows (separate budgets); `.reset stats` unaffected; mount +
+perks + upgrades + infusions all stack in `.propover plist`/`list`.
+
 ## Design notes
 
 - Rules: donor always consumed; target destruction fires the same

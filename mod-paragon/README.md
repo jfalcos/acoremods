@@ -69,5 +69,39 @@ GM: `.paragon addpx / setlevel / coins / resetperks / debug / reload / vendor`.
   on a 4-week cycle (`paragon_vendor_stock.week_id` 0-3).
 - Dormant: `season*` columns and the old leaderboard concept (future work).
 
-Tests: `tests/ParagonPerksTests.cpp` (gtest, via `mod-paragon.cmake`,
-`-DBUILD_TESTING=ON`).
+Tests: `tests/ParagonPerksTests.cpp` + `tests/ParagonItemUpgradesTests.cpp`
+(gtest, via `mod-paragon.cmake`, `-DBUILD_TESTING=ON`).
+
+## Testing runbook (in game, as GM)
+
+Setup:
+
+```
+.npc add 96000                   -- spawn the Quartermaster (once)
+.paragon setxp 30                -- divert 30% of XP (level-capped; see conf)
+.paragon addpx 1670800           -- exactly one paragon level of PX
+```
+
+Walk the loop:
+
+1. **Earning**: the addpx crossing broadcasts the level and MAILS one
+   Paragon Coin — collect it at a mailbox; it appears in the **currency
+   tab** (Miscellaneous), not your bags. `.paragon info` shows PL 1.
+   Killing mobs with a divert set visibly slows the XP bar by that share.
+2. **Perks**: `.additem 37711 20` for test coins, then Quartermaster ->
+   "Character perks" — rows read WoW-style `Stamina: 161 (156+5)  rank
+   0/20, 1 coins`. Buy a rank -> character sheet moves instantly;
+   `.propover plist` shows the `[paragon]` row; `.reset stats` and relog
+   keep it. `.paragon resetperks` refunds nothing but clears all ranks.
+3. **Item upgrades**: Quartermaster -> "Upgrade an equipped item" -> pick
+   an item (label shows `budget spent/total`) -> category -> stat row with
+   live before/after preview (ratings preview in %). Buy: coins deduct at
+   the rising 1-4 tier, PropertyOverlay tooltip gains the line. Keep
+   buying until "budget full" refuses — a low-ilvl green refuses far
+   earlier than an epic (corpus-fitted budgets). `.paragon upgrades 15`
+   matches the gossip.
+4. **Vendor**: "Browse this week's collection" sells the rotating
+   cosmetics for coins (4-week cycle); `.paragon vendor` (GM) inspects.
+5. **Edges**: BG/arena XP never feeds PX; `.paragon toggle` stops earning;
+   upgraded items keep their rows through trades (activate at receiver's
+   next login).

@@ -94,3 +94,30 @@ resistances — the apply path mirrors `Player::_ApplyItemBonuses`.
 No core patches required; all hooks are stock. Tests are pure-logic gtest
 suites registered via `mod-property-override.cmake` (build with
 `-DBUILD_TESTING=ON`).
+
+## Testing runbook (in game, as GM)
+
+```
+.propover padd sta 50            -- +50 Stamina on yourself (source 'gm')
+.propover plist                  -- shows [gm] Stamina +50
+.reset stats                     -- character sheet keeps the +50 (accumulators survive)
+.propover pclear                 -- bonus gone
+
+.propover add 15 agi 25          -- +25 Agility on your main-hand item
+.propover list 15                -- shows [gm] Agility +25
+```
+
+Then verify the display + lifecycle behaviors:
+
+- With PropertyOverlay installed, the item tooltip gains "Upgrade: +25
+  Agility" (green line). Without it, stats still apply — only the line is
+  missing.
+- Unequip the item -> character sheet drops the bonus; re-equip -> back
+  (2s reconcile at worst). Relog -> persists.
+- Trade the item to another character -> bonus activates at the receiver's
+  NEXT login (ownership joins live at load).
+- Destroy the item (vendor/delete) -> `.propover list` on a fresh copy is
+  clean; rows purge with the engine's item-delete transaction.
+- Same property from two sources stacks: `.propover padd sta 10` while a
+  mount bond or paragon perk also grants Stamina -> `.propover plist`
+  shows both rows, sheet shows the sum.
